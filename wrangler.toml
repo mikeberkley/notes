@@ -1,0 +1,6 @@
+# Used for local development only: `npx wrangler pages dev dist`
+# Cloudflare Pages deploys automatically after `npm run build` — no deploy command needed.
+
+name = "notes"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-01-15"
