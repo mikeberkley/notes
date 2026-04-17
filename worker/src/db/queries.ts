@@ -343,7 +343,9 @@ export async function searchSmos(
     INNER JOIN smos s ON s.id = f.smo_id
     WHERE smo_fts MATCH ? AND f.user_id = ?
   `;
-  const params: (string | number)[] = [query, userId];
+  // Add prefix operator (*) to each term so partial input matches full tokens
+  const ftsQuery = query.trim().split(/\s+/).map(t => `${t}*`).join(' ');
+  const params: (string | number)[] = [ftsQuery, userId];
 
   if (layer !== undefined) {
     sql += ' AND f.layer = ?';

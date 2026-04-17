@@ -257,6 +257,7 @@ function MemoryCard({ result, heat, query }: { result: SearchResult; heat?: Heat
 
 export default function Search() {
   const [query, setQuery] = useState('');
+  const [resultsQuery, setResultsQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [layerFilter, setLayerFilter] = useState<number | undefined>();
   const [fromDate, setFromDate] = useState('');
@@ -269,6 +270,7 @@ export default function Search() {
     try {
       const data = await api.search(q, layer, from || undefined, to || undefined);
       setResults(data);
+      setResultsQuery(q);
     } catch (err) {
       console.error(err);
     } finally {
@@ -386,7 +388,7 @@ export default function Search() {
           {(() => {
             const heatMap = computeHeatLabels(results);
             return results.map(r => (
-              <MemoryCard key={r.smo_id} result={r} heat={heatMap.get(r.smo_id)} query={query} />
+              <MemoryCard key={r.smo_id} result={r} heat={heatMap.get(r.smo_id)} query={resultsQuery} />
             ));
           })()}
         </div>
