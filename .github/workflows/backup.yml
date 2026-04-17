@@ -1,0 +1,32 @@
+name: Weekly D1 Backup to R2
+
+on:
+  schedule:
+    - cron: '0 4 * * 0'  # Every Sunday at 04:00 UTC
+  workflow_dispatch:       # Allow manual trigger
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    name: Export D1 → R2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Export D1 database
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 74088836dff42e8f84630c2a7a51a4aa
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          wrangler d1 export notes-db --output "notes-db-${DATE}.sqlite"
+          wrangler r2 object put "notes-db-backups/notes-db-${DATE}.sqlite" \
+            --file "notes-db-${DATE}.sqlite"
+          echo "Backup uploaded: notes-db-${DATE}.sqlite"
