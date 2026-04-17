@@ -67,36 +67,44 @@ function computeHeatLabels(results: SearchResult[]): Map<string, HeatLabel> {
 
 function buildSnippets(text: string, rawQuery: string, maxSnippets = 5, windowChars = 100): string[] {
   if (!rawQuery.trim() || !text) return [];
+
   const terms = rawQuery
     .split(/\s+/)
     .filter(t => t.length > 0 && !['AND', 'OR', 'NOT'].includes(t.toUpperCase()))
     .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   if (terms.length === 0) return [];
 
-  const findPattern = new RegExp(terms.join('|'), 'gi');
-  const matchStarts: number[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = findPattern.exec(text)) !== null) matchStarts.push(m.index);
-  if (matchStarts.length === 0) return [];
+  const termRegexes = terms.map(t => new RegExp(t, 'i'));
+  const anyTermPattern = new RegExp(terms.join('|'), 'gi');
 
-  // Build windows around each match; only merge when two match positions are
-  // themselves within windowChars of each other (not just when padded windows touch)
-  const windows: { from: number; to: number }[] = [];
-  let lastMatchStart = -Infinity;
-  for (const start of matchStarts) {
-    const from = Math.max(0, start - windowChars);
-    const to = Math.min(text.length, start + windowChars);
-    const last = windows[windows.length - 1];
-    if (last && start - lastMatchStart <= windowChars) {
-      last.to = Math.max(last.to, to);
-    } else {
-      windows.push({ from, to });
+  // Collect every position where any term matches
+  const matchPositions: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = anyTermPattern.exec(text)) !== null) matchPositions.push(m.index);
+  if (matchPositions.length === 0) return [];
+
+  // Build windows around each match position, keeping only those where
+  // ALL terms appear somewhere within the window (AND semantics).
+  // Fall back to any-term windows if no all-term window exists.
+  const tryBuild = (requireAll: boolean): { from: number; to: number }[] => {
+    const result: { from: number; to: number }[] = [];
+    let lastCenter = -Infinity;
+    for (const pos of matchPositions) {
+      if (pos - lastCenter < windowChars) continue; // avoid near-duplicate windows
+      const from = Math.max(0, pos - windowChars);
+      const to = Math.min(text.length, pos + windowChars);
+      if (requireAll && !termRegexes.every(re => re.test(text.slice(from, to)))) continue;
+      result.push({ from, to });
+      lastCenter = pos;
+      if (result.length >= maxSnippets) break;
     }
-    lastMatchStart = start;
-  }
+    return result;
+  };
+
+  const windows = tryBuild(true).length > 0 ? tryBuild(true) : tryBuild(false);
 
   const hlPattern = new RegExp(terms.join('|'), 'gi');
-  return windows.slice(0, maxSnippets).map(({ from, to }) => {
+  return windows.map(({ from, to }) => {
     let excerpt = text.slice(from, to);
     if (from > 0) excerpt = '…' + excerpt;
     if (to < text.length) excerpt += '…';
