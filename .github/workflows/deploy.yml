@@ -22,6 +22,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_API_URL: https://notes-api.lost2038.com
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

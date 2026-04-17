@@ -1,0 +1,34 @@
+name = "notes-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+# 5 min CPU — Cloudflare's hard maximum on the paid plan (300,000 ms).
+# I/O wait (awaiting OpenRouter) does not count against CPU time.
+[limits]
+cpu_ms = 300000
+
+[[routes]]
+pattern = "notes-api.lost2038.com"
+custom_domain = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "notes-db"
+database_id = "dfebbfc2-db8e-43fb-a203-355cca9d6f45"
+migrations_dir = "src/db/migrations"
+
+[triggers]
+crons = ["45 2 * * *", "30 3 * * *"]
+
+[vars]
+APP_URL = "https://notes.lost2038.com"
+API_URL = "https://notes-api.lost2038.com"
+OPENROUTER_MODEL = "anthropic/claude-sonnet-4-6"
+
+# Secrets (set via `wrangler secret put`):
+#   GOOGLE_CLIENT_ID
+#   GOOGLE_CLIENT_SECRET
+#   OPENROUTER_API_KEY
+#   SESSION_SECRET
