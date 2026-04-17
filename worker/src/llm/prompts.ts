@@ -53,9 +53,14 @@ export function buildLayer1Prompt(date: string, sources: Array<{
 }>): string {
   const sourceMaterial = sources.map(s => {
     const meta = JSON.parse(s.metadata);
-    const label = s.type === 'gmail'
-      ? `[EMAIL] Subject: ${meta.subject} | From: ${meta.sender}`
-      : `[DRIVE] File: ${meta.filename}`;
+    let label: string;
+    if (s.type === 'gmail') {
+      label = `[EMAIL] Subject: ${meta.subject} | From: ${meta.sender}`;
+    } else if (s.type === 'gcalendar') {
+      label = `[CALENDAR] ${meta.title}${meta.location ? ` | Location: ${meta.location}` : ''}`;
+    } else {
+      label = `[DRIVE] File: ${meta.filename}`;
+    }
 
     if (s.summary) {
       // Use structured mini-summary
@@ -95,7 +100,8 @@ Generate a structured memory object conforming EXACTLY to this JSON schema:
   ],
   "keywords": ["string"],
   "key_entities": ["string"],
-  "open_questions": "string | null"
+  "open_questions": "string | null",
+  "location": "string | null"
 }
 
 Rules:
@@ -103,6 +109,7 @@ Rules:
 - Each theme summary must be exactly 2 sentences
 - keywords and key_entities must be arrays of strings (5–15 keywords)
 - open_questions is a single string or null
+- location should be "City, State/Province, Country" inferred from calendar event physical locations; null if no location data is available
 - Do not include date_range fields
 - If there is no meaningful content, generate a valid object with headline "No notable activity" and an empty themes array`;
 }

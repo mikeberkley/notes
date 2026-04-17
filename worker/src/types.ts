@@ -38,7 +38,7 @@ export interface ApiKey {
 export interface RawSource {
   id: string;
   user_id: string;
-  source_type: 'gmail' | 'gdrive' | 'workflowy';
+  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar';
   external_id: string;
   content: string;
   metadata: string;
@@ -63,6 +63,7 @@ export interface Smo {
   keywords: string;       // JSON array
   key_entities: string;   // JSON array
   open_questions: string | null;
+  location: string | null;
   date_range_start: string;
   date_range_end: string;
   created_at: string;

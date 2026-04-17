@@ -87,7 +87,7 @@ export async function refreshOAuthAccessToken(
 export async function insertRawSource(
   db: D1Database,
   userId: string,
-  sourceType: 'gmail' | 'gdrive',
+  sourceType: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar',
   externalId: string,
   content: string,
   metadata: object,
@@ -174,6 +174,7 @@ export async function insertSmo(
     keywords: string[];
     key_entities: string[];
     open_questions: string | null;
+    location?: string | null;
     themes: Array<{ headline: string; summary: string }>;
   },
   dateStart: string,
@@ -183,14 +184,15 @@ export async function insertSmo(
   const smoId = randomUUID();
 
   await db.prepare(`
-    INSERT INTO smos (id, user_id, layer, headline, summary, keywords, key_entities, open_questions, date_range_start, date_range_end)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO smos (id, user_id, layer, headline, summary, keywords, key_entities, open_questions, location, date_range_start, date_range_end)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     smoId, userId, layer,
     data.headline, data.summary,
     JSON.stringify(data.keywords),
     JSON.stringify(data.key_entities),
     data.open_questions,
+    data.location ?? null,
     dateStart, dateEnd,
   ).run();
 

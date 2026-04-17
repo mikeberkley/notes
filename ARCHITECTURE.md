@@ -7,7 +7,7 @@
 
 ## 1. Product Overview
 
-A personal notes intelligence app that ingests daily content from Gmail, Google Drive, and Workflowy, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens.
+A personal notes intelligence app that ingests daily content from Gmail, Google Drive, Google Calendar, and Workflowy, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens.
 
 **URL:** notes.lost2038.com  
 **Current users:** Single (owner), schema designed for future multi-user expansion.
@@ -86,6 +86,7 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 │   │   ├── ingestion/
 │   │   │   ├── gmail.ts            ← Gmail API: list + fetch messages, extract text/plain
 │   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs/Slides, download others
+│   │   │   ├── gcalendar.ts        ← Calendar API: fetch today's events, extract title/time/location
 │   │   │   ├── workflowy.ts        ← Workflowy API: /nodes-export, tree grouping, indented outline
 │   │   │   └── pipeline.ts         ← orchestrates ingestion for all users
 │   │   ├── llm/
@@ -182,7 +183,7 @@ CREATE TABLE config (
 CREATE TABLE raw_sources (
   id             TEXT PRIMARY KEY,
   user_id        TEXT NOT NULL REFERENCES users(id),
-  source_type    TEXT NOT NULL,             -- 'gmail' | 'gdrive' | 'workflowy'
+  source_type    TEXT NOT NULL,             -- 'gmail' | 'gdrive' | 'gcalendar' | 'workflowy'
   external_id    TEXT NOT NULL,
   content        TEXT NOT NULL,
   metadata       TEXT NOT NULL,             -- JSON: subject/sender/filename/mime_type/etc.
@@ -209,6 +210,7 @@ CREATE TABLE smos (
   keywords          TEXT NOT NULL,        -- JSON array
   key_entities      TEXT NOT NULL,        -- JSON array
   open_questions    TEXT,
+  location          TEXT,                   -- Layer 1 only: "City, State, Country" inferred from calendar events
   date_range_start  DATE NOT NULL,
   date_range_end    DATE NOT NULL,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -345,6 +347,7 @@ Config stored in `~/.notes/config.json`.
 openid  email  profile
 https://www.googleapis.com/auth/gmail.readonly
 https://www.googleapis.com/auth/drive.readonly
+https://www.googleapis.com/auth/calendar.readonly
 ```
 
 ### Adding a new Google account (e.g. switching personal → work)
@@ -391,6 +394,13 @@ For each user with a valid Google refresh token:
   │   └── .docx / .doc / .pdf        → Drive text export (best-effort; raw UTF-8 download as fallback)
   └── Insert into raw_sources (source_type='gdrive')
        externalId = fileId::modifiedTime (re-ingests if file is updated within the window)
+
+  Google Calendar ingestion (worker/src/ingestion/gcalendar.ts)
+  ├── Fetch all non-cancelled events from the primary calendar for the target date (UTC)
+  ├── For each event: extract title, start/end times, location, attendees, description
+  └── Insert into raw_sources (source_type='gcalendar')
+       externalId = event.id (INSERT OR IGNORE — safe to re-run)
+       Note: calendar events are never per-source summarized; used as-is in the Layer 1 prompt
 
   Workflowy ingestion (worker/src/ingestion/workflowy.ts)
   ├── Skipped if workflowy_api_key not set in user config
@@ -486,7 +496,8 @@ Generate a structured memory object conforming EXACTLY to this JSON schema:
   "themes": [{ "headline": "...", "summary": "EXACTLY 2 sentences" }],  // 1–5 items
   "keywords": ["string"],       // 5–15
   "key_entities": ["string"],   // people, projects, orgs, places
-  "open_questions": "string | null"
+  "open_questions": "string | null",
+  "location": "string | null"   // "City, State, Country" from calendar event locations; null if unavailable
 }
 ```
 Fallback: if a source's summarization failed, its raw content is truncated to 4,000 chars and used instead.
@@ -710,7 +721,6 @@ After deployment, complete these steps once:
 ## 19. Future Enhancements (not in MVP)
 
 - Daily brief email (morning summary)
-- Google Calendar ingestion
 - Slack ingestion
 - Semantic / vector search (Cloudflare Vectorize)
 - Multi-user support (user_id FK already in schema)

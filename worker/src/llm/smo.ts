@@ -21,6 +21,7 @@ interface LLMSmoResponse {
   keywords: string[];
   key_entities: string[];
   open_questions: string | null;
+  location: string | null;
 }
 
 interface SourceSummaryResponse {
@@ -47,7 +48,9 @@ export function parseSourceSummaryResponse(raw: string): SourceSummaryResponse {
  * Safe to re-run: skips sources that already have a summary.
  */
 export async function summarizeRawSources(env: Env, userId: string, date: string): Promise<void> {
-  const sources = await getUnsummarizedSources(env.DB, userId, date);
+  const allUnsummarized = await getUnsummarizedSources(env.DB, userId, date);
+  // Calendar events are pre-structured and used as-is; no per-source LLM summarization needed
+  const sources = allUnsummarized.filter(s => s.source_type !== 'gcalendar');
   if (sources.length === 0) return;
 
   console.log(`[summarize] ${sources.length} source(s) to summarize for ${date}`);
@@ -100,6 +103,7 @@ export function parseLLMResponse(raw: string): LLMSmoResponse {
   if (!Array.isArray(parsed.themes)) parsed.themes = [];
   if (!Array.isArray(parsed.keywords)) parsed.keywords = [];
   if (!Array.isArray(parsed.key_entities)) parsed.key_entities = [];
+  if (!('location' in parsed)) parsed.location = null;
 
   // Clamp themes to 1–5
   parsed.themes = parsed.themes.slice(0, 5);
@@ -144,7 +148,7 @@ export async function generateLayer1Smo(env: Env, userId: string, date: string):
   }
 
   const sourceIds = sources.map(s => ({ type: 'raw_source' as const, id: s.id }));
-  return insertSmo(env.DB, userId, 1, data, date, date, sourceIds);
+  return insertSmo(env.DB, userId, 1, { ...data, location: data.location ?? null }, date, date, sourceIds);
 }
 
 export async function generateLayer2Smo(env: Env, userId: string, endDate: string): Promise<string | null> {
