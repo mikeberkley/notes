@@ -95,7 +95,7 @@ function MemoryCard({ result }: { result: SearchResult }) {
             </span>
             {result.rank !== null && (
               <span className="text-xs text-gray-400 font-mono">
-                score {(-result.rank).toFixed(2)}
+                score {(-result.rank).toExponential(2)}
               </span>
             )}
           </div>

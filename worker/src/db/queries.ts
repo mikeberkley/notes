@@ -338,7 +338,7 @@ export async function searchSmos(
     SELECT f.smo_id, f.layer, s.headline,
            s.date_range_start, s.date_range_end,
            substr(s.summary, 1, 200) as snippet,
-           rank
+           f.rank
     FROM smo_fts f
     INNER JOIN smos s ON s.id = f.smo_id
     WHERE smo_fts MATCH ? AND f.user_id = ?
