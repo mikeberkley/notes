@@ -65,6 +65,14 @@ function computeHeatLabels(results: SearchResult[]): Map<string, HeatLabel> {
   return map;
 }
 
+function formatCardDate(start: string, end: string): string {
+  const fmt = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  return start === end ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
+}
+
 function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SmoDetail | null>(null);
@@ -109,12 +117,11 @@ function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-bold text-gray-900">
+              {formatCardDate(result.date_range_start, result.date_range_end)}
+            </span>
             <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${LAYER_COLORS[result.layer]}`}>
               {LAYER_LABELS[result.layer]}
-            </span>
-            <span className="text-sm font-medium text-gray-700">
-              {result.date_range_start}
-              {result.date_range_end !== result.date_range_start && ` – ${result.date_range_end}`}
             </span>
           </div>
           <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
