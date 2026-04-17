@@ -44,7 +44,28 @@ function formatAsMarkdown(result: SearchResult, detail: SmoDetail): string {
   return lines.join('\n');
 }
 
-function MemoryCard({ result }: { result: SearchResult }) {
+type HeatLabel = 'HOT' | 'WARM' | 'MILD';
+const HEAT_STYLES: Record<HeatLabel, string> = {
+  HOT:  'text-orange-500 font-semibold',
+  WARM: 'text-amber-500 font-semibold',
+  MILD: 'text-blue-400 font-semibold',
+};
+
+function computeHeatLabels(results: SearchResult[]): Map<string, HeatLabel> {
+  const ranked = results.filter(r => r.rank !== null);
+  const map = new Map<string, HeatLabel>();
+  if (ranked.length === 0) return map;
+
+  // FTS5 rank: more negative = better. Sort ascending (best first).
+  const sorted = [...ranked].sort((a, b) => a.rank! - b.rank!);
+  sorted.forEach((r, i) => {
+    const pct = i / sorted.length;
+    map.set(r.smo_id, pct < 0.33 ? 'HOT' : pct < 0.66 ? 'WARM' : 'MILD');
+  });
+  return map;
+}
+
+function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SmoDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -93,10 +114,8 @@ function MemoryCard({ result }: { result: SearchResult }) {
               {result.date_range_start}
               {result.date_range_end !== result.date_range_start && ` – ${result.date_range_end}`}
             </span>
-            {result.rank !== null && (
-              <span className="text-xs text-gray-400 font-mono">
-                score {(-result.rank).toExponential(2)}
-              </span>
+            {heat && (
+              <span className={`text-xs ${HEAT_STYLES[heat]}`}>{heat}</span>
             )}
           </div>
           <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
@@ -308,9 +327,12 @@ export default function Search() {
         )}
 
         <div className="space-y-2">
-          {results.map(r => (
-            <MemoryCard key={r.smo_id} result={r} />
-          ))}
+          {(() => {
+            const heatMap = computeHeatLabels(results);
+            return results.map(r => (
+              <MemoryCard key={r.smo_id} result={r} heat={heatMap.get(r.smo_id)} />
+            ));
+          })()}
         </div>
       </main>
     </div>
