@@ -23,7 +23,11 @@ export default function Settings() {
   }, []);
 
   async function saveFolder() {
-    await api.settings.update({ gdrive_folder_id: folderInput });
+    const value = folderInput.trim() || 'root';
+    await api.settings.update({ gdrive_folder_id: value });
+    setFolderInput(value === 'root' ? '' : value);
+    const fresh = await api.settings.get();
+    setSettings(fresh);
     setMessage('Saved.');
     setTimeout(() => setMessage(''), 2000);
   }
@@ -97,12 +101,15 @@ export default function Settings() {
         {/* Google Drive folder */}
         <section className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="font-semibold text-gray-900 mb-1">Google Drive Folder</h2>
-          <p className="text-xs text-gray-500 mb-4">Paste the folder ID from the Google Drive URL</p>
+          <p className="text-xs text-gray-500 mb-4">
+            Ingest all of Drive, or restrict to a specific folder by pasting its ID from the Drive URL.
+            Leave blank to ingest all of Drive.
+          </p>
           <div className="flex gap-2">
             <input
-              value={folderInput}
+              value={folderInput === 'root' ? '' : folderInput}
               onChange={e => setFolderInput(e.target.value)}
-              placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+              placeholder="Folder ID — leave blank to ingest all of Drive"
               className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
@@ -112,6 +119,9 @@ export default function Settings() {
               Save
             </button>
           </div>
+          {(settings?.gdrive_folder_id === null || settings?.gdrive_folder_id === 'root' || !settings?.gdrive_folder_id) && (
+            <p className="text-xs text-indigo-600 mt-2">Ingesting entire Drive</p>
+          )}
         </section>
 
         {/* Workflowy */}

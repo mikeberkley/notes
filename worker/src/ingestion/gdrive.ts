@@ -105,8 +105,7 @@ export async function ingestGDrive(
   userId: string,
   date: string, // YYYY-MM-DD
 ): Promise<void> {
-  const folderId = await getConfig(db, userId, 'gdrive_folder_id');
-  if (!folderId) return;
+  const folderId = (await getConfig(db, userId, 'gdrive_folder_id')) ?? 'root';
 
   const modifiedAfter = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const files = await listFilesRecursive(folderId, modifiedAfter, accessToken);
