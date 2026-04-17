@@ -45,10 +45,10 @@ function formatAsMarkdown(result: SearchResult, detail: SmoDetail): string {
 }
 
 type HeatLabel = 'HOT' | 'WARM' | 'MILD';
-const HEAT_STYLES: Record<HeatLabel, string> = {
-  HOT:  'text-orange-500 font-semibold',
-  WARM: 'text-amber-500 font-semibold',
-  MILD: 'text-blue-400 font-semibold',
+const HEAT_BORDER: Record<HeatLabel, string> = {
+  HOT:  'border-orange-400',
+  WARM: 'border-amber-400',
+  MILD: 'border-blue-300',
 };
 
 function computeHeatLabels(results: SearchResult[]): Map<string, HeatLabel> {
@@ -98,8 +98,10 @@ function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }
     }
   }
 
+  const borderClass = heat ? HEAT_BORDER[heat] : 'border-gray-200';
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden transition-shadow hover:shadow-sm">
+    <div className={`bg-white rounded-xl border-2 ${borderClass} overflow-hidden transition-shadow hover:shadow-sm`}>
       {/* Summary row — always visible, click to expand */}
       <button
         onClick={toggle}
@@ -110,13 +112,10 @@ function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }
             <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${LAYER_COLORS[result.layer]}`}>
               {LAYER_LABELS[result.layer]}
             </span>
-            <span className="text-xs text-gray-400">
+            <span className="text-sm font-medium text-gray-700">
               {result.date_range_start}
               {result.date_range_end !== result.date_range_start && ` – ${result.date_range_end}`}
             </span>
-            {heat && (
-              <span className={`text-xs ${HEAT_STYLES[heat]}`}>{heat}</span>
-            )}
           </div>
           <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
           {result.snippet && !expanded && (
