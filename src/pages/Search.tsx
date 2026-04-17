@@ -74,19 +74,25 @@ function buildSnippets(text: string, rawQuery: string, maxSnippets = 5, windowCh
   if (terms.length === 0) return [];
 
   const findPattern = new RegExp(terms.join('|'), 'gi');
-  const matches: { start: number }[] = [];
+  const matchStarts: number[] = [];
   let m: RegExpExecArray | null;
-  while ((m = findPattern.exec(text)) !== null) matches.push({ start: m.index });
-  if (matches.length === 0) return [];
+  while ((m = findPattern.exec(text)) !== null) matchStarts.push(m.index);
+  if (matchStarts.length === 0) return [];
 
-  // Build windows around each match, merging overlapping ones
+  // Build windows around each match; only merge when two match positions are
+  // themselves within windowChars of each other (not just when padded windows touch)
   const windows: { from: number; to: number }[] = [];
-  for (const { start } of matches) {
+  let lastMatchStart = -Infinity;
+  for (const start of matchStarts) {
     const from = Math.max(0, start - windowChars);
     const to = Math.min(text.length, start + windowChars);
     const last = windows[windows.length - 1];
-    if (last && from <= last.to) { last.to = Math.max(last.to, to); }
-    else windows.push({ from, to });
+    if (last && start - lastMatchStart <= windowChars) {
+      last.to = Math.max(last.to, to);
+    } else {
+      windows.push({ from, to });
+    }
+    lastMatchStart = start;
   }
 
   const hlPattern = new RegExp(terms.join('|'), 'gi');
