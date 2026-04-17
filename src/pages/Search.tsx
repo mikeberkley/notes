@@ -139,7 +139,7 @@ function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }
         <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
         {result.snippet && !expanded && (
           <p
-            className="text-xs text-gray-500 mt-1 line-clamp-1"
+            className="text-xs text-gray-600 mt-1.5 line-clamp-3 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5"
             dangerouslySetInnerHTML={{ __html: result.snippet }}
           />
         )}

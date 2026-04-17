@@ -332,12 +332,12 @@ export async function searchSmos(
   }
 
   // Non-empty query: FTS
-  // Use s.headline and s.summary from the smos JOIN — the FTS table is contentless
-  // (content='') so snippet() and reading indexed columns back both fail.
+  // snippet() works because migration 0005 rebuilt smo_fts without content=''
+  // column -1 picks the best-matching indexed column; <mark> tags are stripped-safe in the UI
   let sql = `
     SELECT f.smo_id, f.layer, s.headline,
            s.date_range_start, s.date_range_end,
-           substr(s.summary, 1, 200) as snippet,
+           snippet(smo_fts, -1, '<mark>', '</mark>', '…', 40) as snippet,
            f.rank
     FROM smo_fts f
     INNER JOIN smos s ON s.id = f.smo_id
