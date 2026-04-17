@@ -4,9 +4,57 @@ interface WorkflowyNode {
   id: string;
   name: string;
   note: string | null;
-  createdAt: number; // Unix timestamp (seconds)
+  parent_id: string | null;
+  priority: number;
+  createdAt: number; // Unix seconds
   modifiedAt: number;
   completedAt: number | null;
+}
+
+function buildChildMap(nodes: WorkflowyNode[]): Map<string | null, WorkflowyNode[]> {
+  const map = new Map<string | null, WorkflowyNode[]>();
+  for (const node of nodes) {
+    const siblings = map.get(node.parent_id) ?? [];
+    siblings.push(node);
+    map.set(node.parent_id, siblings);
+  }
+  // Sort each sibling list by priority
+  for (const siblings of map.values()) {
+    siblings.sort((a, b) => a.priority - b.priority);
+  }
+  return map;
+}
+
+function findRoot(nodeId: string, nodeById: Map<string, WorkflowyNode>): WorkflowyNode {
+  let node = nodeById.get(nodeId)!;
+  while (node.parent_id && nodeById.has(node.parent_id)) {
+    node = nodeById.get(node.parent_id)!;
+  }
+  return node;
+}
+
+function serializeSubtree(
+  nodeId: string,
+  childMap: Map<string | null, WorkflowyNode[]>,
+  nodeById: Map<string, WorkflowyNode>,
+  indent = 0,
+): string {
+  const node = nodeById.get(nodeId);
+  if (!node || !node.name.trim()) return '';
+
+  const pad = '  '.repeat(indent);
+  const lines: string[] = [`${pad}- ${node.name.trim()}`];
+  if (node.note?.trim()) {
+    lines.push(`${pad}  ${node.note.trim()}`);
+  }
+
+  const children = childMap.get(nodeId) ?? [];
+  for (const child of children) {
+    const sub = serializeSubtree(child.id, childMap, nodeById, indent + 1);
+    if (sub) lines.push(sub);
+  }
+
+  return lines.join('\n');
 }
 
 export async function ingestWorkflowy(
@@ -29,26 +77,32 @@ export async function ingestWorkflowy(
   const data = await resp.json<{ nodes: WorkflowyNode[] }>();
   const nodes = data.nodes ?? [];
 
+  const nodeById = new Map(nodes.map(n => [n.id, n]));
+  const childMap = buildChildMap(nodes);
+
   const cutoff = Date.now() / 1000 - 24 * 60 * 60;
-  const recent = nodes.filter(n => n.createdAt >= cutoff && n.name?.trim());
+  const recentNodes = nodes.filter(n => n.createdAt >= cutoff && n.name?.trim());
 
-  console.log(`[workflowy] ${recent.length} node(s) created in the last 24 hours`);
+  // Group recently-created nodes by their root ancestor
+  const rootIds = new Set(recentNodes.map(n => findRoot(n.id, nodeById).id));
+  console.log(`[workflowy] ${recentNodes.length} recent node(s) across ${rootIds.size} root tree(s)`);
 
-  for (const node of recent) {
+  for (const rootId of rootIds) {
     try {
-      const content = node.note?.trim()
-        ? `${node.name}\n\n${node.note}`
-        : node.name;
+      const root = nodeById.get(rootId)!;
+      const content = serializeSubtree(rootId, childMap, nodeById);
+      if (!content.trim()) continue;
 
       const metadata = {
-        node_id: node.id,
-        created_at: node.createdAt,
-        modified_at: node.modifiedAt,
+        root_node_id: rootId,
+        root_name: root.name,
+        recent_node_count: recentNodes.filter(n => findRoot(n.id, nodeById).id === rootId).length,
       };
 
-      await insertRawSource(db, userId, 'workflowy', node.id, content, metadata, date);
+      // externalId includes date so each day's snapshot is a distinct record
+      await insertRawSource(db, userId, 'workflowy', `${rootId}::${date}`, content, metadata, date);
     } catch (err) {
-      console.error(`[workflowy] Node ${node.id} error:`, err);
+      console.error(`[workflowy] Root ${rootId} error:`, err);
     }
   }
 }
