@@ -2,21 +2,34 @@ export const SYSTEM_PROMPT = `You are a memory assistant. Your job is to read a 
 Respond ONLY with a single valid JSON object. No markdown, no explanation, no extra text — just the JSON.`;
 
 export function buildSourceSummaryPrompt(
-  sourceType: 'gmail' | 'gdrive',
+  sourceType: 'gmail' | 'gdrive' | 'workflowy' | 'slack',
   metadata: string,
   content: string,
 ): string {
   const meta = JSON.parse(metadata);
-  const label = sourceType === 'gmail'
-    ? `EMAIL — Subject: ${meta.subject ?? '(no subject)'} | From: ${meta.sender ?? 'unknown'}`
-    : `DRIVE FILE — ${meta.filename ?? 'unknown'}`;
+
+  let label: string;
+  let contentLabel: string;
+  if (sourceType === 'gmail') {
+    label = `EMAIL — Subject: ${meta.subject ?? '(no subject)'} | From: ${meta.sender ?? 'unknown'}`;
+    contentLabel = 'email';
+  } else if (sourceType === 'slack' && meta.type === 'dm') {
+    label = `SLACK DM — Conversation with ${meta.with_user ?? 'unknown'} (${meta.message_count ?? 0} messages)`;
+    contentLabel = 'Slack DM conversation';
+  } else if (sourceType === 'slack' && meta.type === 'channel') {
+    label = `SLACK CHANNEL — My posts in ${meta.channel_name ?? 'unknown'} (${meta.message_count ?? 0} messages)`;
+    contentLabel = 'Slack channel messages';
+  } else {
+    label = `DRIVE FILE — ${meta.filename ?? 'unknown'}`;
+    contentLabel = 'document';
+  }
 
   // Truncate extremely long content to avoid context overflow (~80k chars ≈ ~20k tokens)
   const truncated = content.length > 80000
     ? content.slice(0, 80000) + '\n\n[truncated]'
     : content;
 
-  return `Summarize the following ${sourceType === 'gmail' ? 'email' : 'document'}.
+  return `Summarize the following ${contentLabel}.
 
 SOURCE: ${label}
 
@@ -53,9 +66,16 @@ export function buildLayer1Prompt(date: string, sources: Array<{
 }>): string {
   const sourceMaterial = sources.map(s => {
     const meta = JSON.parse(s.metadata);
-    const label = s.type === 'gmail'
-      ? `[EMAIL] Subject: ${meta.subject} | From: ${meta.sender}`
-      : `[DRIVE] File: ${meta.filename}`;
+    let label: string;
+    if (s.type === 'gmail') {
+      label = `[EMAIL] Subject: ${meta.subject} | From: ${meta.sender}`;
+    } else if (s.type === 'slack' && meta.type === 'dm') {
+      label = `[SLACK DM] With: ${meta.with_user}`;
+    } else if (s.type === 'slack' && meta.type === 'channel') {
+      label = `[SLACK] My posts in ${meta.channel_name}`;
+    } else {
+      label = `[DRIVE] File: ${meta.filename}`;
+    }
 
     if (s.summary) {
       // Use structured mini-summary

@@ -124,26 +124,31 @@ export default {
 
     // GET /api/settings
     if (path === '/api/settings' && request.method === 'GET') {
-      const [gdriveFolder, workflowyKey, oauthToken] = await Promise.all([
+      const [gdriveFolder, workflowyKey, slackToken, oauthToken] = await Promise.all([
         getConfig(env.DB, userId, 'gdrive_folder_id'),
         getConfig(env.DB, userId, 'workflowy_api_key'),
+        getConfig(env.DB, userId, 'slack_token'),
         getOAuthToken(env.DB, userId),
       ]);
       return json({
         gdrive_folder_id: gdriveFolder,
         workflowy_api_key: workflowyKey ? '••••••••' : null,
+        slack_token: slackToken ? '••••••••' : null,
         connections: { google: !!oauthToken },
       });
     }
 
     // PUT /api/settings
     if (path === '/api/settings' && request.method === 'PUT') {
-      const body = await request.json<{ gdrive_folder_id?: string; workflowy_api_key?: string }>();
+      const body = await request.json<{ gdrive_folder_id?: string; workflowy_api_key?: string; slack_token?: string }>();
       if (body.gdrive_folder_id !== undefined) {
         await setConfig(env.DB, userId, 'gdrive_folder_id', body.gdrive_folder_id);
       }
       if (body.workflowy_api_key !== undefined) {
         await setConfig(env.DB, userId, 'workflowy_api_key', body.workflowy_api_key);
+      }
+      if (body.slack_token !== undefined) {
+        await setConfig(env.DB, userId, 'slack_token', body.slack_token);
       }
       return json({ ok: true });
     }

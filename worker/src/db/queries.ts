@@ -87,7 +87,7 @@ export async function refreshOAuthAccessToken(
 export async function insertRawSource(
   db: D1Database,
   userId: string,
-  sourceType: 'gmail' | 'gdrive',
+  sourceType: 'gmail' | 'gdrive' | 'workflowy' | 'slack',
   externalId: string,
   content: string,
   metadata: object,

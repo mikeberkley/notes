@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { api, type ApiKeyRecord } from '../lib/api.js';
 
 export default function Settings() {
-  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; connections: { google: boolean } } | null>(null);
+  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; slack_token: string | null; connections: { google: boolean } } | null>(null);
   const [folderInput, setFolderInput] = useState('');
   const [workflowyKeyInput, setWorkflowyKeyInput] = useState('');
+  const [slackTokenInput, setSlackTokenInput] = useState('');
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null);
@@ -39,6 +40,16 @@ export default function Settings() {
     const fresh = await api.settings.get();
     setSettings(fresh);
     setMessage('Workflowy API key saved.');
+    setTimeout(() => setMessage(''), 2000);
+  }
+
+  async function saveSlackToken() {
+    if (!slackTokenInput.trim()) return;
+    await api.settings.update({ slack_token: slackTokenInput.trim() });
+    setSlackTokenInput('');
+    const fresh = await api.settings.get();
+    setSettings(fresh);
+    setMessage('Slack token saved.');
     setTimeout(() => setMessage(''), 2000);
   }
 
@@ -142,6 +153,31 @@ export default function Settings() {
             />
             <button
               onClick={saveWorkflowyKey}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
+            >
+              Save
+            </button>
+          </div>
+        </section>
+
+        {/* Slack */}
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="font-semibold text-gray-900 mb-1">Slack</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            {settings?.slack_token
+              ? 'Token saved. Paste a new token below to replace it.'
+              : 'Paste a Slack user token (xoxp-…) to enable daily DM and channel post ingestion.'}
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={slackTokenInput}
+              onChange={e => setSlackTokenInput(e.target.value)}
+              placeholder={settings?.slack_token ? '••••••••' : 'xoxp-…'}
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={saveSlackToken}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
             >
               Save
