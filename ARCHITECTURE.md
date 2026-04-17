@@ -1,13 +1,13 @@
 # Notes App — Architecture & Implementation Reference
 
-**Last updated:** 2026-04-16 (tests added)  
+**Last updated:** 2026-04-17  
 **Status:** Built and deployed ✅
 
 ---
 
 ## 1. Product Overview
 
-A personal notes intelligence app that ingests daily content from Gmail and Google Drive, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens.
+A personal notes intelligence app that ingests daily content from Gmail, Google Drive, and Workflowy, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens.
 
 **URL:** notes.lost2038.com  
 **Current users:** Single (owner), schema designed for future multi-user expansion.
@@ -22,6 +22,7 @@ A personal notes intelligence app that ingests daily content from Gmail and Goog
 | API Worker | https://notes-api.lost2038.com |
 | Cloudflare Account ID | `74088836dff42e8f84630c2a7a51a4aa` |
 | D1 Database | `notes-db` · ID `dfebbfc2-db8e-43fb-a203-355cca9d6f45` |
+| R2 Backup Bucket | `notes-db-backups` |
 | Worker name | `notes-api` |
 | Pages project name | `notes` |
 | Google OAuth Client ID | `833938843826-7gtm93vcocguqumj89q13oc53firfpsa.apps.googleusercontent.com` |
@@ -53,8 +54,11 @@ A personal notes intelligence app that ingests daily content from Gmail and Goog
                                 ┌──────▼──────┐  ┌─────▼───────────┐  ┌───────▼─────────────┐
                                 │ Cloudflare  │  │  Google APIs    │  │  OpenRouter         │
                                 │ D1 (SQLite) │  │  - Gmail        │  │  model: kimi-k2     │
-                                └─────────────┘  │  - Drive        │  │  (configurable)     │
-                                                 └─────────────────┘  └─────────────────────┘
+                                │ R2 (backups)│  │  - Drive        │  │  (configurable)     │
+                                └─────────────┘  └─────────────────┘  └─────────────────────┘
+                                                 ┌─────────────────┐
+                                                 │  Workflowy API  │
+                                                 └─────────────────┘
 ```
 
 ---
@@ -81,7 +85,8 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 │   │   │   └── session.ts          ← HS256 JWT (hand-rolled, no deps) + cookie helpers
 │   │   ├── ingestion/
 │   │   │   ├── gmail.ts            ← Gmail API: list + fetch messages, extract text/plain
-│   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs, download others
+│   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs/Slides, download others
+│   │   │   ├── workflowy.ts        ← Workflowy API: /nodes-export, tree grouping, indented outline
 │   │   │   └── pipeline.ts         ← orchestrates ingestion for all users
 │   │   ├── llm/
 │   │   │   ├── openrouter.ts       ← OpenRouter chat completions client
@@ -115,7 +120,8 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 │   └── package.json
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml              ← pushes to main auto-deploy frontend to Pages
+│       ├── deploy.yml              ← pushes to main auto-deploy frontend to Pages
+│       └── backup.yml              ← weekly D1 export to R2 (every Sunday 04:00 UTC)
 ├── .env.production                 ← VITE_API_URL baked in at build time
 ├── index.html
 ├── vite.config.js
@@ -170,13 +176,13 @@ CREATE TABLE config (
   value    TEXT NOT NULL,
   PRIMARY KEY (user_id, key)
 );
--- Keys used: gdrive_folder_id
+-- Keys used: gdrive_folder_id, workflowy_api_key
 
 -- Raw source material (source of truth)
 CREATE TABLE raw_sources (
   id             TEXT PRIMARY KEY,
   user_id        TEXT NOT NULL REFERENCES users(id),
-  source_type    TEXT NOT NULL,             -- 'gmail' | 'gdrive'
+  source_type    TEXT NOT NULL,             -- 'gmail' | 'gdrive' | 'workflowy'
   external_id    TEXT NOT NULL,
   content        TEXT NOT NULL,
   metadata       TEXT NOT NULL,             -- JSON: subject/sender/filename/mime_type/etc.
@@ -229,15 +235,18 @@ CREATE TABLE source_pointers (
 );
 
 -- Full-text search (FTS5)
+-- content='' was removed (migration 0005) — contentless tables don't store UNINDEXED
+-- columns, breaking JOINs. The table now stores its own copy of all columns.
 CREATE VIRTUAL TABLE smo_fts USING fts5(
-  smo_id       UNINDEXED,
-  user_id      UNINDEXED,
-  layer        UNINDEXED,
+  smo_id        UNINDEXED,
+  user_id       UNINDEXED,
+  layer         UNINDEXED,
   headline,
+  summary,
   keywords,
   key_entities,
   themes_text,
-  content=''
+  open_questions
 );
 ```
 
@@ -269,8 +278,8 @@ Raw Sources
   GET  /api/raw-sources/:id                  → full raw source content
 
 Settings
-  GET  /api/settings                         → { gdrive_folder_id, connections: { google } }
-  PUT  /api/settings                         → update config values
+  GET  /api/settings                         → { gdrive_folder_id, workflowy_api_key: '••••••••' | null, connections: { google } }
+  PUT  /api/settings                         → update config values (gdrive_folder_id, workflowy_api_key)
 
 Admin / Debug
   POST /api/admin/ingest/trigger             → manually trigger ingestion
@@ -382,6 +391,22 @@ For each user with a valid Google refresh token:
   │   └── .docx / .doc / .pdf        → Drive text export (best-effort; raw UTF-8 download as fallback)
   └── Insert into raw_sources (source_type='gdrive')
        externalId = fileId::modifiedTime (re-ingests if file is updated within the window)
+
+  Workflowy ingestion (worker/src/ingestion/workflowy.ts)
+  ├── Skipped if workflowy_api_key not set in user config
+  ├── GET /nodes-export → flat list of all nodes (rate-limited: 1 req/min)
+  ├── Build parent→children map, find all nodes created in the last 24 hours
+  ├── Group recently-created nodes by their root ancestor
+  ├── For each root tree with recent activity:
+  │   ├── Compute relevantIds = recent nodes + all their ancestors (excludes old siblings)
+  │   ├── Serialize as indented outline (only relevant nodes):
+  │   │     - Root node text
+  │   │       - Ancestor context
+  │   │         - Recently created node
+  │   │       - Another recently created node
+  │   └── Insert into raw_sources (source_type='workflowy')
+  │         externalId = rootNodeId::date (one record per root tree per day)
+  └── Note: node.note field appended below node.name if present
 ```
 
 **Deduplication:** `UNIQUE(user_id, source_type, external_id)` — INSERT OR IGNORE.
@@ -546,6 +571,7 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 ### Settings (`/settings`)
 - Google connection status + reconnect link
 - Google Drive folder ID input + save
+- Workflowy API key input (password field) + save — key is stored per-user in the `config` table, never as a global secret; shown as `••••••••` once saved
 - API Keys: list, create (key shown once with copy button), revoke
 - "Run ingestion now" debug button
 
@@ -675,6 +701,7 @@ After deployment, complete these steps once:
 
 - [ ] Sign in at **notes.lost2038.com** with your Google account — this creates your user row and stores OAuth tokens
 - [ ] Go to **Settings** → paste your Google Drive folder ID (copy it from the Drive URL: `drive.google.com/drive/folders/{FOLDER_ID}`)
+- [ ] Go to **Settings** → paste your Workflowy API key (from workflowy.com → Settings → API) to enable Workflowy ingestion
 - [ ] Optionally: click **Run ingestion now** to ingest today's content immediately rather than waiting for the 02:45 UTC cron
 - [ ] Create an API key in Settings → copy and store it somewhere safe → configure the CLI: `notes config set api-key <key>`
 
