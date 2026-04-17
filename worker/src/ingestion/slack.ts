@@ -116,6 +116,7 @@ async function ingestChannelPosts(
   token: string,
   ownName: string,
   date: string,
+  windowStart: number,
 ): Promise<void> {
   type SearchMatch = {
     ts: string;
@@ -134,20 +135,22 @@ async function ingestChannelPosts(
         matches: SearchMatch[];
         paging: { pages: number; page: number };
       };
-    }>('search.messages', { query: `from:me on:${date}`, count: '100', page: String(page) }, token).catch(err => {
+    }>('search.messages', { query: 'from:me', count: '100', page: String(page) }, token).catch(err => {
       console.error('[slack] search.messages error:', err);
       return null;
     });
 
     if (!data) break;
 
+    let pastWindow = false;
     for (const match of data.messages.matches) {
+      if (parseFloat(match.ts) < windowStart) { pastWindow = true; continue; }
       const id = match.channel.id;
       if (!messagesByChannel.has(id)) messagesByChannel.set(id, []);
       messagesByChannel.get(id)!.push(match);
     }
 
-    if (page >= data.messages.paging.pages) break;
+    if (pastWindow || page >= data.messages.paging.pages) break;
     page++;
   }
 
@@ -189,11 +192,12 @@ export async function ingestSlack(
   const userNameCache = new Map<string, string>();
   const ownName = await resolveUserName(ownSlackId, token, userNameCache);
 
-  const dayStart = new Date(`${date}T00:00:00Z`).getTime() / 1000;
-  const dayEnd = new Date(`${date}T23:59:59Z`).getTime() / 1000;
+  // Rolling 24-hour window ending now
+  const windowEnd = Date.now() / 1000;
+  const windowStart = windowEnd - 24 * 60 * 60;
 
-  await ingestDMs(db, userId, token, ownSlackId, ownName, date, dayStart, dayEnd, userNameCache);
-  await ingestChannelPosts(db, userId, token, ownName, date);
+  await ingestDMs(db, userId, token, ownSlackId, ownName, date, windowStart, windowEnd, userNameCache);
+  await ingestChannelPosts(db, userId, token, ownName, date, windowStart);
 
   console.log(`[slack] Ingestion complete for ${date}`);
 }

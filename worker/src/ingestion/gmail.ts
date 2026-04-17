@@ -65,9 +65,9 @@ export async function ingestGmail(
   userId: string,
   date: string, // YYYY-MM-DD
 ): Promise<void> {
-  // Build date filter — messages where internalDate falls on the given date (UTC)
-  const startMs = new Date(`${date}T00:00:00Z`).getTime();
-  const endMs = new Date(`${date}T23:30:00Z`).getTime(); // stop before 11:30 PM UTC so we don't grab tomorrow
+  // Rolling 24-hour window ending now
+  const endMs = Date.now();
+  const startMs = endMs - 24 * 60 * 60 * 1000;
   const query = `after:${Math.floor(startMs / 1000)} before:${Math.floor(endMs / 1000)}`;
 
   const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`;
