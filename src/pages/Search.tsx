@@ -113,10 +113,10 @@ function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }
       {/* Summary row — always visible, click to expand */}
       <button
         onClick={toggle}
-        className="w-full flex items-start justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+        className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
             <span className="text-sm font-bold text-gray-900">
               {formatCardDate(result.date_range_start, result.date_range_end)}
             </span>
@@ -124,25 +124,25 @@ function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }
               {LAYER_LABELS[result.layer]}
             </span>
           </div>
-          <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
-          {result.snippet && !expanded && (
-            <p
-              className="text-xs text-gray-500 mt-1 line-clamp-1"
-              dangerouslySetInnerHTML={{ __html: result.snippet }}
-            />
-          )}
+          <div className="shrink-0 flex items-center gap-2">
+            <button
+              onClick={copyMd}
+              className="text-xs text-gray-400 hover:text-indigo-600 border border-gray-200 hover:border-indigo-300 rounded px-2 py-0.5 transition-colors"
+            >
+              {copied ? '✓ Copied' : 'Copy MD'}
+            </button>
+            <span className="text-gray-300 text-sm">
+              {loading ? '…' : expanded ? '▲' : '▼'}
+            </span>
+          </div>
         </div>
-        <div className="shrink-0 flex items-center gap-2 mt-0.5">
-          <button
-            onClick={copyMd}
-            className="text-xs text-gray-400 hover:text-indigo-600 border border-gray-200 hover:border-indigo-300 rounded px-2 py-0.5 transition-colors"
-          >
-            {copied ? '✓ Copied' : 'Copy MD'}
-          </button>
-          <span className="text-gray-300 text-sm">
-            {loading ? '…' : expanded ? '▲' : '▼'}
-          </span>
-        </div>
+        <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
+        {result.snippet && !expanded && (
+          <p
+            className="text-xs text-gray-500 mt-1 line-clamp-1"
+            dangerouslySetInnerHTML={{ __html: result.snippet }}
+          />
+        )}
       </button>
 
       {/* Expanded detail */}
