@@ -33,14 +33,31 @@ function findRoot(nodeId: string, nodeById: Map<string, WorkflowyNode>): Workflo
   return node;
 }
 
+function buildRelevantIds(
+  recentNodes: WorkflowyNode[],
+  nodeById: Map<string, WorkflowyNode>,
+): Set<string> {
+  const relevant = new Set<string>();
+  for (const node of recentNodes) {
+    // Walk from this node up to root, marking every ancestor as relevant
+    let current: WorkflowyNode | undefined = node;
+    while (current) {
+      relevant.add(current.id);
+      current = current.parent_id ? nodeById.get(current.parent_id) : undefined;
+    }
+  }
+  return relevant;
+}
+
 function serializeSubtree(
   nodeId: string,
   childMap: Map<string | null, WorkflowyNode[]>,
   nodeById: Map<string, WorkflowyNode>,
+  relevantIds: Set<string>,
   indent = 0,
 ): string {
   const node = nodeById.get(nodeId);
-  if (!node || !node.name.trim()) return '';
+  if (!node || !node.name.trim() || !relevantIds.has(nodeId)) return '';
 
   const pad = '  '.repeat(indent);
   const lines: string[] = [`${pad}- ${node.name.trim()}`];
@@ -50,7 +67,7 @@ function serializeSubtree(
 
   const children = childMap.get(nodeId) ?? [];
   for (const child of children) {
-    const sub = serializeSubtree(child.id, childMap, nodeById, indent + 1);
+    const sub = serializeSubtree(child.id, childMap, nodeById, relevantIds, indent + 1);
     if (sub) lines.push(sub);
   }
 
@@ -87,10 +104,13 @@ export async function ingestWorkflowy(
   const rootIds = new Set(recentNodes.map(n => findRoot(n.id, nodeById).id));
   console.log(`[workflowy] ${recentNodes.length} recent node(s) across ${rootIds.size} root tree(s)`);
 
+  // Only render nodes that are recent or ancestors of recent nodes
+  const relevantIds = buildRelevantIds(recentNodes, nodeById);
+
   for (const rootId of rootIds) {
     try {
       const root = nodeById.get(rootId)!;
-      const content = serializeSubtree(rootId, childMap, nodeById);
+      const content = serializeSubtree(rootId, childMap, nodeById, relevantIds);
       if (!content.trim()) continue;
 
       const metadata = {
