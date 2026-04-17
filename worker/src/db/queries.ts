@@ -337,7 +337,7 @@ export async function searchSmos(
   let sql = `
     SELECT f.smo_id, f.layer, s.headline,
            s.date_range_start, s.date_range_end,
-           snippet(smo_fts, 4, '<mark>', '</mark>', '…', 40) as snippet,
+           s.summary as snippet,
            f.rank
     FROM smo_fts f
     INNER JOIN smos s ON s.id = f.smo_id

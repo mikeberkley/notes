@@ -65,6 +65,39 @@ function computeHeatLabels(results: SearchResult[]): Map<string, HeatLabel> {
   return map;
 }
 
+function buildSnippets(text: string, rawQuery: string, maxSnippets = 5, windowChars = 100): string[] {
+  if (!rawQuery.trim() || !text) return [];
+  const terms = rawQuery
+    .split(/\s+/)
+    .filter(t => t.length > 0 && !['AND', 'OR', 'NOT'].includes(t.toUpperCase()))
+    .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (terms.length === 0) return [];
+
+  const findPattern = new RegExp(terms.join('|'), 'gi');
+  const matches: { start: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = findPattern.exec(text)) !== null) matches.push({ start: m.index });
+  if (matches.length === 0) return [];
+
+  // Build windows around each match, merging overlapping ones
+  const windows: { from: number; to: number }[] = [];
+  for (const { start } of matches) {
+    const from = Math.max(0, start - windowChars);
+    const to = Math.min(text.length, start + windowChars);
+    const last = windows[windows.length - 1];
+    if (last && from <= last.to) { last.to = Math.max(last.to, to); }
+    else windows.push({ from, to });
+  }
+
+  const hlPattern = new RegExp(terms.join('|'), 'gi');
+  return windows.slice(0, maxSnippets).map(({ from, to }) => {
+    let excerpt = text.slice(from, to);
+    if (from > 0) excerpt = '…' + excerpt;
+    if (to < text.length) excerpt += '…';
+    return excerpt.replace(hlPattern, match => `<mark>${match}</mark>`);
+  });
+}
+
 function formatCardDate(start: string, end: string): string {
   const fmt = (iso: string) => {
     const [y, m, d] = iso.split('-').map(Number);
@@ -73,7 +106,7 @@ function formatCardDate(start: string, end: string): string {
   return start === end ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
 }
 
-function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }) {
+function MemoryCard({ result, heat, query }: { result: SearchResult; heat?: HeatLabel; query: string }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SmoDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -137,12 +170,21 @@ function MemoryCard({ result, heat }: { result: SearchResult; heat?: HeatLabel }
           </div>
         </div>
         <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
-        {result.snippet && !expanded && (
-          <p
-            className="text-xs text-gray-600 mt-1.5 line-clamp-3 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5"
-            dangerouslySetInnerHTML={{ __html: result.snippet }}
-          />
-        )}
+        {!expanded && (() => {
+          const snippets = buildSnippets(result.snippet ?? '', query);
+          if (snippets.length === 0) return null;
+          return (
+            <div className="mt-1.5 space-y-1">
+              {snippets.map((s, i) => (
+                <p
+                  key={i}
+                  className="text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5"
+                  dangerouslySetInnerHTML={{ __html: s }}
+                />
+              ))}
+            </div>
+          );
+        })()}
       </button>
 
       {/* Expanded detail */}
@@ -338,7 +380,7 @@ export default function Search() {
           {(() => {
             const heatMap = computeHeatLabels(results);
             return results.map(r => (
-              <MemoryCard key={r.smo_id} result={r} heat={heatMap.get(r.smo_id)} />
+              <MemoryCard key={r.smo_id} result={r} heat={heatMap.get(r.smo_id)} query={query} />
             ));
           })()}
         </div>
