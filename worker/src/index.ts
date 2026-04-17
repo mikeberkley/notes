@@ -124,19 +124,26 @@ export default {
 
     // GET /api/settings
     if (path === '/api/settings' && request.method === 'GET') {
-      const gdriveFolder = await getConfig(env.DB, userId, 'gdrive_folder_id');
-      const oauthToken = await getOAuthToken(env.DB, userId);
+      const [gdriveFolder, workflowyKey, oauthToken] = await Promise.all([
+        getConfig(env.DB, userId, 'gdrive_folder_id'),
+        getConfig(env.DB, userId, 'workflowy_api_key'),
+        getOAuthToken(env.DB, userId),
+      ]);
       return json({
         gdrive_folder_id: gdriveFolder,
+        workflowy_api_key: workflowyKey ? '••••••••' : null,
         connections: { google: !!oauthToken },
       });
     }
 
     // PUT /api/settings
     if (path === '/api/settings' && request.method === 'PUT') {
-      const body = await request.json<{ gdrive_folder_id?: string }>();
+      const body = await request.json<{ gdrive_folder_id?: string; workflowy_api_key?: string }>();
       if (body.gdrive_folder_id !== undefined) {
         await setConfig(env.DB, userId, 'gdrive_folder_id', body.gdrive_folder_id);
+      }
+      if (body.workflowy_api_key !== undefined) {
+        await setConfig(env.DB, userId, 'workflowy_api_key', body.workflowy_api_key);
       }
       return json({ ok: true });
     }

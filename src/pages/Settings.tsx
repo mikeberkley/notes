@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { api, type ApiKeyRecord } from '../lib/api.js';
 
 export default function Settings() {
-  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; connections: { google: boolean } } | null>(null);
+  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; connections: { google: boolean } } | null>(null);
   const [folderInput, setFolderInput] = useState('');
+  const [workflowyKeyInput, setWorkflowyKeyInput] = useState('');
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null);
@@ -24,6 +25,16 @@ export default function Settings() {
   async function saveFolder() {
     await api.settings.update({ gdrive_folder_id: folderInput });
     setMessage('Saved.');
+    setTimeout(() => setMessage(''), 2000);
+  }
+
+  async function saveWorkflowyKey() {
+    if (!workflowyKeyInput.trim()) return;
+    await api.settings.update({ workflowy_api_key: workflowyKeyInput.trim() });
+    setWorkflowyKeyInput('');
+    const fresh = await api.settings.get();
+    setSettings(fresh);
+    setMessage('Workflowy API key saved.');
     setTimeout(() => setMessage(''), 2000);
   }
 
@@ -96,6 +107,31 @@ export default function Settings() {
             />
             <button
               onClick={saveFolder}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
+            >
+              Save
+            </button>
+          </div>
+        </section>
+
+        {/* Workflowy */}
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="font-semibold text-gray-900 mb-1">Workflowy</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            {settings?.workflowy_api_key
+              ? 'API key saved. Paste a new key below to replace it.'
+              : 'Paste your Workflowy API key to enable daily note ingestion.'}
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={workflowyKeyInput}
+              onChange={e => setWorkflowyKeyInput(e.target.value)}
+              placeholder={settings?.workflowy_api_key ? '••••••••' : 'Paste API key…'}
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={saveWorkflowyKey}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
             >
               Save

@@ -92,8 +92,8 @@ export const api = {
   },
 
   settings: {
-    get: () => apiFetch<{ gdrive_folder_id: string | null; connections: { google: boolean } }>('/api/settings'),
-    update: (data: { gdrive_folder_id?: string }) =>
+    get: () => apiFetch<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; connections: { google: boolean } }>('/api/settings'),
+    update: (data: { gdrive_folder_id?: string; workflowy_api_key?: string }) =>
       apiFetch<{ ok: boolean }>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
   },
 

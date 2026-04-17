@@ -3,6 +3,7 @@ import { getAllUsersWithTokens, refreshOAuthAccessToken } from '../db/queries.js
 import { todayUTC } from '../db/utils.js';
 import { ingestGmail } from './gmail.js';
 import { ingestGDrive } from './gdrive.js';
+import { ingestWorkflowy } from './workflowy.js';
 
 export async function runIngestionPipeline(env: Env, date?: string): Promise<void> {
   const targetDate = date ?? todayUTC();
@@ -21,6 +22,7 @@ export async function runIngestionPipeline(env: Env, date?: string): Promise<voi
 
       await ingestGmail(env.DB, accessToken, user.id, targetDate);
       await ingestGDrive(env.DB, accessToken, user.id, targetDate);
+      await ingestWorkflowy(env.DB, user.id, targetDate);
 
       console.log(`[ingestion] Completed for user ${user.id}`);
     } catch (err) {
