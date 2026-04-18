@@ -8,6 +8,7 @@ import {
   saveSourceSummaryError,
   getLayer1SmosForRange,
   getLayer2SmosForRange,
+  getSmosByLayerAndDate,
   getSmoById,
   getThemesBySmoId,
   insertSmo,
@@ -103,6 +104,7 @@ export function parseLLMResponse(raw: string): LLMSmoResponse {
   if (!Array.isArray(parsed.themes)) parsed.themes = [];
   if (!Array.isArray(parsed.keywords)) parsed.keywords = [];
   if (!Array.isArray(parsed.key_entities)) parsed.key_entities = [];
+  if (parsed.open_questions === undefined) parsed.open_questions = null;
   if (parsed.location === undefined) parsed.location = null;
 
   // Clamp themes to 1–5
@@ -112,6 +114,13 @@ export function parseLLMResponse(raw: string): LLMSmoResponse {
 }
 
 export async function generateLayer1Smo(env: Env, userId: string, date: string): Promise<string | null> {
+  // Skip if already generated for this date
+  const existing = await getSmosByLayerAndDate(env.DB, userId, 1, date);
+  if (existing.length > 0) {
+    console.log(`[smo] Layer 1 already exists for user ${userId} on ${date}, skipping`);
+    return existing[0].id;
+  }
+
   // Step 1: ensure all sources are summarized first
   await summarizeRawSources(env, userId, date);
 
@@ -154,6 +163,11 @@ export async function generateLayer1Smo(env: Env, userId: string, date: string):
 
 export async function generateLayer2Smo(env: Env, userId: string, endDate: string): Promise<string | null> {
   const startDate = daysAgo(new Date(endDate), 6);
+  const existing = await getSmosByLayerAndDate(env.DB, userId, 2, startDate);
+  if (existing.length > 0) {
+    console.log(`[smo] Layer 2 already exists for user ${userId} starting ${startDate}, skipping`);
+    return existing[0].id;
+  }
   const layer1Smos = await getLayer1SmosForRange(env.DB, userId, startDate, endDate);
   if (layer1Smos.length === 0) return null;
 
@@ -180,6 +194,11 @@ export async function generateLayer2Smo(env: Env, userId: string, endDate: strin
 
 export async function generateLayer3Smo(env: Env, userId: string, endDate: string): Promise<string | null> {
   const startDate = daysAgo(new Date(endDate), 27); // ~4 weeks
+  const existing = await getSmosByLayerAndDate(env.DB, userId, 3, startDate);
+  if (existing.length > 0) {
+    console.log(`[smo] Layer 3 already exists for user ${userId} starting ${startDate}, skipping`);
+    return existing[0].id;
+  }
   const layer2Smos = await getLayer2SmosForRange(env.DB, userId, startDate, endDate);
   if (layer2Smos.length === 0) return null;
 

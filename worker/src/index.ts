@@ -25,7 +25,7 @@ import { runSmoGenerationPipeline } from './llm/smo.js';
 import { json, notFound, unauthorized, cors } from './utils/responses.js';
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -156,15 +156,14 @@ export default {
     // POST /api/admin/ingest/trigger
     if (path === '/api/admin/ingest/trigger' && request.method === 'POST') {
       const body = await request.json<{ date?: string }>().catch(() => ({ date: undefined }));
-      // Fire-and-forget (no waitUntil in browser context — admin triggers are best-effort)
-      runIngestionPipeline(env, body?.date).catch(console.error);
+      ctx.waitUntil(runIngestionPipeline(env, body?.date).catch(console.error));
       return json({ ok: true, message: 'Ingestion triggered' });
     }
 
     // POST /api/admin/smo/generate
     if (path === '/api/admin/smo/generate' && request.method === 'POST') {
       const date = url.searchParams.get('date') ?? undefined;
-      runSmoGenerationPipeline(env, date).catch(console.error);
+      ctx.waitUntil(runSmoGenerationPipeline(env, date).catch(console.error));
       return json({ ok: true, message: 'SMO generation triggered' });
     }
 

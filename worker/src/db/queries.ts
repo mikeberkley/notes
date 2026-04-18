@@ -191,7 +191,7 @@ export async function insertSmo(
     data.headline, data.summary,
     JSON.stringify(data.keywords),
     JSON.stringify(data.key_entities),
-    data.open_questions,
+    data.open_questions ?? null,
     data.location ?? null,
     dateStart, dateEnd,
   ).run();

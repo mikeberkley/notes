@@ -16,6 +16,6 @@ export async function handleScheduled(event: ScheduledEvent, env: Env): Promise<
   } else if (hour === 3 && minute === 30) {
     await runSmoGenerationPipeline(env);
   } else {
-    console.log(`[cron] Unexpected schedule time ${hour}:${minute}, skipping`);
+    console.log(`[cron] Unexpected trigger at ${hour}:${minute} UTC — no action taken`);
   }
 }
