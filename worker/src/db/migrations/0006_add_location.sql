@@ -1,0 +1,1 @@
+ALTER TABLE smos ADD COLUMN location TEXT;

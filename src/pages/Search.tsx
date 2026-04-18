@@ -167,6 +167,9 @@ function MemoryCard({ result, heat, query }: { result: SearchResult; heat?: Heat
             <span className="text-sm font-bold text-gray-900">
               {formatCardDate(result.date_range_start, result.date_range_end)}
             </span>
+            {result.location && (
+              <span className="text-sm text-gray-500">{result.location}</span>
+            )}
             <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${LAYER_COLORS[result.layer]}`}>
               {LAYER_LABELS[result.layer]}
             </span>

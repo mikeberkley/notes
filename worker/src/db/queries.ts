@@ -175,6 +175,7 @@ export async function insertSmo(
     key_entities: string[];
     open_questions: string | null;
     themes: Array<{ headline: string; summary: string }>;
+    location?: string | null;
   },
   dateStart: string,
   dateEnd: string,
@@ -183,14 +184,15 @@ export async function insertSmo(
   const smoId = randomUUID();
 
   await db.prepare(`
-    INSERT INTO smos (id, user_id, layer, headline, summary, keywords, key_entities, open_questions, date_range_start, date_range_end)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO smos (id, user_id, layer, headline, summary, keywords, key_entities, open_questions, location, date_range_start, date_range_end)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     smoId, userId, layer,
     data.headline, data.summary,
     JSON.stringify(data.keywords),
     JSON.stringify(data.key_entities),
     data.open_questions,
+    data.location ?? null,
     dateStart, dateEnd,
   ).run();
 
@@ -307,11 +309,11 @@ export async function searchSmos(
   fromDate?: string,
   toDate?: string,
   limit = 200,
-): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; snippet: string; rank: number | null }>> {
+): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null }>> {
   // Empty query: list all SMOs sorted by date, no FTS needed
   if (!query.trim()) {
     let sql = `
-      SELECT id as smo_id, layer, headline, date_range_start, date_range_end, '' as snippet, NULL as rank
+      SELECT id as smo_id, layer, headline, date_range_start, date_range_end, location, '' as snippet, NULL as rank
       FROM smos
       WHERE user_id = ?
     `;
@@ -326,7 +328,7 @@ export async function searchSmos(
 
     const { results } = await db.prepare(sql).bind(...params).all<{
       smo_id: string; layer: number; headline: string;
-      date_range_start: string; date_range_end: string; snippet: string;
+      date_range_start: string; date_range_end: string; location: string | null; snippet: string;
     }>();
     return results;
   }
@@ -336,7 +338,7 @@ export async function searchSmos(
   // column -1 picks the best-matching indexed column; <mark> tags are stripped-safe in the UI
   let sql = `
     SELECT f.smo_id, f.layer, s.headline,
-           s.date_range_start, s.date_range_end,
+           s.date_range_start, s.date_range_end, s.location,
            (s.summary || ' ' || COALESCE(f.themes_text, '') || ' ' || COALESCE(s.open_questions, '')) as snippet,
            f.rank
     FROM smo_fts f
@@ -369,6 +371,7 @@ export async function searchSmos(
     headline: string;
     date_range_start: string;
     date_range_end: string;
+    location: string | null;
     snippet: string;
     rank: number;
   }>();

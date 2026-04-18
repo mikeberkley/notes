@@ -1,6 +1,7 @@
 import type { Env } from '../types.js';
 import { callLLM } from './openrouter.js';
 import { SYSTEM_PROMPT, buildLayer1Prompt, buildRollupPrompt, buildSourceSummaryPrompt } from './prompts.js';
+import { fetchCalendarEvents } from '../ingestion/gcal.js';
 import {
   getRawSourcesByDate,
   getUnsummarizedSources,
@@ -21,6 +22,7 @@ interface LLMSmoResponse {
   keywords: string[];
   key_entities: string[];
   open_questions: string | null;
+  location: string | null;
 }
 
 interface SourceSummaryResponse {
@@ -100,6 +102,7 @@ export function parseLLMResponse(raw: string): LLMSmoResponse {
   if (!Array.isArray(parsed.themes)) parsed.themes = [];
   if (!Array.isArray(parsed.keywords)) parsed.keywords = [];
   if (!Array.isArray(parsed.key_entities)) parsed.key_entities = [];
+  if (parsed.location === undefined) parsed.location = null;
 
   // Clamp themes to 1–5
   parsed.themes = parsed.themes.slice(0, 5);
@@ -107,12 +110,22 @@ export function parseLLMResponse(raw: string): LLMSmoResponse {
   return parsed;
 }
 
-export async function generateLayer1Smo(env: Env, userId: string, date: string): Promise<string | null> {
+export async function generateLayer1Smo(env: Env, userId: string, date: string, accessToken?: string): Promise<string | null> {
   // Step 1: ensure all sources are summarized first
   await summarizeRawSources(env, userId, date);
 
   // Step 2: fetch sources (now with summary fields populated where possible)
   const sources = await getRawSourcesByDate(env.DB, userId, date);
+
+  // Step 3: fetch calendar events to deduce location
+  const calendarEvents = accessToken
+    ? await fetchCalendarEvents(accessToken, date).catch(() => [])
+    : [];
+  const calendarForPrompt = calendarEvents.map(e => ({
+    summary: e.summary,
+    location: e.location,
+    start: e.start.dateTime ?? e.start.date,
+  }));
 
   let data: LLMSmoResponse;
 
@@ -124,6 +137,7 @@ export async function generateLayer1Smo(env: Env, userId: string, date: string):
       keywords: [],
       key_entities: [],
       open_questions: null,
+      location: null,
     };
   } else {
     const userPrompt = buildLayer1Prompt(
@@ -138,6 +152,7 @@ export async function generateLayer1Smo(env: Env, userId: string, date: string):
         keywords: s.keywords,
         open_questions: s.open_questions,
       })),
+      calendarForPrompt,
     );
     const raw = await callLLM(env, SYSTEM_PROMPT, userPrompt);
     data = parseLLMResponse(raw);
@@ -200,16 +215,18 @@ export async function generateLayer3Smo(env: Env, userId: string, endDate: strin
 }
 
 export async function runSmoGenerationPipeline(env: Env, date?: string): Promise<void> {
-  const { getAllUsersWithTokens } = await import('../db/queries.js');
-  const targetDate = date ?? new Date().toISOString().slice(0, 10);
+  const { getAllUsersWithTokens, refreshOAuthAccessToken } = await import('../db/queries.js');
+  const targetDate = date ?? daysAgo(new Date(), 1);
   const targetDateObj = new Date(targetDate);
 
   const users = await getAllUsersWithTokens(env.DB);
 
   for (const user of users) {
     try {
+      const accessToken = await refreshOAuthAccessToken(env.DB, env, user.id).catch(() => null);
+
       // Layer 1 — always
-      await generateLayer1Smo(env, user.id, targetDate);
+      await generateLayer1Smo(env, user.id, targetDate, accessToken ?? undefined);
       console.log(`[smo] Layer 1 generated for user ${user.id} on ${targetDate}`);
 
       // Layer 2 — every Friday

@@ -27,6 +27,7 @@ export interface SearchResult {
   headline: string;
   date_range_start: string;
   date_range_end: string;
+  location: string | null;
   snippet: string;
   rank: number | null;
 }
@@ -45,6 +46,7 @@ export interface SmoDetail {
   keywords: string[];
   key_entities: string[];
   open_questions: string | null;
+  location: string | null;
   date_range_start: string;
   date_range_end: string;
   themes: Theme[];

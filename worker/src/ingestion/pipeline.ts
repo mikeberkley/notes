@@ -1,13 +1,13 @@
 import type { Env } from '../types.js';
 import { getAllUsersWithTokens, refreshOAuthAccessToken } from '../db/queries.js';
-import { todayUTC } from '../db/utils.js';
+import { daysAgo } from '../db/utils.js';
 import { ingestGmail } from './gmail.js';
 import { ingestGDrive } from './gdrive.js';
 import { ingestWorkflowy } from './workflowy.js';
 import { ingestSlack } from './slack.js';
 
 export async function runIngestionPipeline(env: Env, date?: string): Promise<void> {
-  const targetDate = date ?? todayUTC();
+  const targetDate = date ?? daysAgo(new Date(), 1);
   console.log(`[ingestion] Starting pipeline for ${targetDate}`);
 
   const users = await getAllUsersWithTokens(env.DB);

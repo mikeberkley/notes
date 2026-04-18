@@ -48,14 +48,9 @@ async function extractText(file: DriveFile, accessToken: string): Promise<string
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
     if (resp.ok) return resp.text();
-
-    const buf = await downloadFile(file.id, accessToken);
-    if (buf.byteLength === 0) return '';
-    try {
-      return new TextDecoder('utf-8', { fatal: false, ignoreBOM: false }).decode(buf);
-    } catch {
-      return '';
-    }
+    // Drive export only works for Google Workspace files; native binary files can't be decoded as text
+    console.warn(`[gdrive] Skipping ${file.name} (${file.mimeType}): export to text/plain not supported`);
+    return '';
   }
 
   return '';

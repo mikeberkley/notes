@@ -52,6 +52,12 @@ Rules:
 - open_questions is a single string summarizing any unresolved items, or null`;
 }
 
+export interface CalendarEventForPrompt {
+  summary?: string;
+  location?: string;
+  start?: string;
+}
+
 export function buildLayer1Prompt(date: string, sources: Array<{
   type: string;
   metadata: string;
@@ -63,7 +69,7 @@ export function buildLayer1Prompt(date: string, sources: Array<{
   open_questions: string | null;
   // Raw content fallback
   content: string;
-}>): string {
+}>, calendarEvents?: CalendarEventForPrompt[]): string {
   const sourceMaterial = sources.map(s => {
     const meta = JSON.parse(s.metadata);
     let label: string;
@@ -98,8 +104,20 @@ export function buildLayer1Prompt(date: string, sources: Array<{
     return `${label}\n${truncated}`;
   }).join('\n\n---\n\n');
 
-  return `Today's date: ${date}
+  let calendarSection = '';
+  if (calendarEvents && calendarEvents.length > 0) {
+    const eventLines = calendarEvents.map(e => {
+      const parts: string[] = [];
+      if (e.start) parts.push(e.start);
+      if (e.summary) parts.push(e.summary);
+      if (e.location) parts.push(`@ ${e.location}`);
+      return parts.join(' — ');
+    });
+    calendarSection = `\nCALENDAR EVENTS:\n${eventLines.join('\n')}\n`;
+  }
 
+  return `Today's date: ${date}
+${calendarSection}
 SOURCE MATERIAL:
 ${sourceMaterial}
 
@@ -115,7 +133,8 @@ Generate a structured memory object conforming EXACTLY to this JSON schema:
   ],
   "keywords": ["string"],
   "key_entities": ["string"],
-  "open_questions": "string | null"
+  "open_questions": "string | null",
+  "location": "string | null"
 }
 
 Rules:
@@ -123,6 +142,7 @@ Rules:
 - Each theme summary must be exactly 2 sentences
 - keywords and key_entities must be arrays of strings (5–15 keywords)
 - open_questions is a single string or null
+- location must be "City, Country" (e.g. "New York, USA") inferred from calendar event locations, or null if not determinable
 - Do not include date_range fields
 - If there is no meaningful content, generate a valid object with headline "No notable activity" and an empty themes array`;
 }

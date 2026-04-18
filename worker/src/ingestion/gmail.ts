@@ -68,7 +68,7 @@ export async function ingestGmail(
   // Rolling 24-hour window ending now
   const endMs = Date.now();
   const startMs = endMs - 24 * 60 * 60 * 1000;
-  const query = `after:${Math.floor(startMs / 1000)} before:${Math.floor(endMs / 1000)}`;
+  const query = `(in:inbox OR in:sent) after:${Math.floor(startMs / 1000)} before:${Math.floor(endMs / 1000)}`;
 
   const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`;
   const listResp = await fetch(listUrl, {

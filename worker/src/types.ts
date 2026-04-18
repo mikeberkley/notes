@@ -63,6 +63,7 @@ export interface Smo {
   keywords: string;       // JSON array
   key_entities: string;   // JSON array
   open_questions: string | null;
+  location: string | null;
   date_range_start: string;
   date_range_end: string;
   created_at: string;
