@@ -4,10 +4,10 @@
 A personal notes intelligence app at **notes.lost2038.com**. It ingests daily content from Gmail and Google Drive, uses an LLM (via OpenRouter) to distill it into a structured memory hierarchy stored in Cloudflare D1, and exposes both a human search UI and a **read-only agent API** so external AI agents and CLI tools can efficiently load context without wasting tokens.
 
 ## Status
-**Pre-build.** Architecture is fully planned. No application code has been written yet.
+**Live and working** at notes.lost2038.com. Build completed April 2026.
 
-## The full plan
-Read **`ARCHITECTURE.md`** in this directory before writing any code. It contains:
+## Architecture reference
+Read **`ARCHITECTURE.md`** for full system documentation:
 - System diagram
 - Full D1 schema (7 tables including `api_keys` with `user_id` throughout)
 - All Worker API routes (`/api/*` for browser, `/agent/*` for agents/CLI)
@@ -30,21 +30,16 @@ Read **`ARCHITECTURE.md`** in this directory before writing any code. It contain
 - **Agent API is read-only** — `Authorization: Bearer <api_key>`, keys stored hashed in D1
 - **CLI wrapper** (`notes` command) is a thin script in `worker/cli/notes.js`
 
-## Build order (start here)
-1. D1 schema migration SQL + create D1 database via Wrangler
-2. Worker scaffold (routing, D1 binding, env vars)
-3. Google OAuth flow
-4. Ingestion pipeline (Gmail, Drive)
-5. LLM pipeline (OpenRouter, SMO prompt, JSON parse, DB write)
-6. Cron wiring
-7. Search endpoint (FTS5)
-8. Agent API routes + API key auth + context assembly
-9. CLI wrapper
-10. Frontend: Login → Settings → Search → SMO drill-down
-11. End-to-end test
-12. Deploy
-
 ## Repo layout
-- `/` — React + Vite + Tailwind frontend (Cloudflare Pages)
-- `/worker/` — Cloudflare Worker (to be created)
-- `ARCHITECTURE.md` — full spec
+- `/src/` — React + Vite + Tailwind frontend (Cloudflare Pages)
+  - `pages/` — Login, Search, Settings, SMODetail
+  - `lib/api.ts` — API client
+- `/worker/` — Cloudflare Worker (backend API + cron)
+  - `src/auth/` — Google OAuth, session management
+  - `src/ingestion/` — Gmail, Google Drive, Workflowy pipelines
+  - `src/llm/` — OpenRouter client, SMO generation, prompts
+  - `src/agent/` — Agent API routes, API key auth, context assembly
+  - `src/cron/` — Scheduled task runner
+  - `src/db/` — D1 queries and utilities
+  - `cli/notes.js` — CLI wrapper script
+- `ARCHITECTURE.md` — full system spec
