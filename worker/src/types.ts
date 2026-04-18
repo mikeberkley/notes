@@ -38,7 +38,7 @@ export interface ApiKey {
 export interface RawSource {
   id: string;
   user_id: string;
-  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'slack';
+  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'slack' | 'gcalendar';
   external_id: string;
   content: string;
   metadata: string;

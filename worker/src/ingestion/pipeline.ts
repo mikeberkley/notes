@@ -5,6 +5,7 @@ import { ingestGmail } from './gmail.js';
 import { ingestGDrive } from './gdrive.js';
 import { ingestWorkflowy } from './workflowy.js';
 import { ingestSlack } from './slack.js';
+import { ingestGCalendar } from './gcalendar.js';
 
 export async function runIngestionPipeline(env: Env, date?: string): Promise<void> {
   const targetDate = date ?? daysAgo(new Date(), 1);
@@ -25,6 +26,7 @@ export async function runIngestionPipeline(env: Env, date?: string): Promise<voi
       await ingestGDrive(env.DB, accessToken, user.id, targetDate);
       await ingestWorkflowy(env.DB, user.id, targetDate);
       await ingestSlack(env.DB, user.id, targetDate);
+      await ingestGCalendar(env.DB, accessToken, user.id, targetDate);
 
       console.log(`[ingestion] Completed for user ${user.id}`);
     } catch (err) {

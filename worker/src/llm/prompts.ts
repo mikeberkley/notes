@@ -52,12 +52,6 @@ Rules:
 - open_questions is a single string summarizing any unresolved items, or null`;
 }
 
-export interface CalendarEventForPrompt {
-  summary?: string;
-  location?: string;
-  start?: string;
-}
-
 export function buildLayer1Prompt(date: string, sources: Array<{
   type: string;
   metadata: string;
@@ -69,12 +63,14 @@ export function buildLayer1Prompt(date: string, sources: Array<{
   open_questions: string | null;
   // Raw content fallback
   content: string;
-}>, calendarEvents?: CalendarEventForPrompt[]): string {
+}>): string {
   const sourceMaterial = sources.map(s => {
     const meta = JSON.parse(s.metadata);
     let label: string;
     if (s.type === 'gmail') {
       label = `[EMAIL] Subject: ${meta.subject} | From: ${meta.sender}`;
+    } else if (s.type === 'gcalendar') {
+      label = `[CALENDAR] ${meta.title}${meta.location ? ` | Location: ${meta.location}` : ''}`;
     } else if (s.type === 'slack' && meta.type === 'dm') {
       label = `[SLACK DM] With: ${meta.with_user}`;
     } else if (s.type === 'slack' && meta.type === 'channel') {
@@ -104,20 +100,8 @@ export function buildLayer1Prompt(date: string, sources: Array<{
     return `${label}\n${truncated}`;
   }).join('\n\n---\n\n');
 
-  let calendarSection = '';
-  if (calendarEvents && calendarEvents.length > 0) {
-    const eventLines = calendarEvents.map(e => {
-      const parts: string[] = [];
-      if (e.start) parts.push(e.start);
-      if (e.summary) parts.push(e.summary);
-      if (e.location) parts.push(`@ ${e.location}`);
-      return parts.join(' — ');
-    });
-    calendarSection = `\nCALENDAR EVENTS:\n${eventLines.join('\n')}\n`;
-  }
-
   return `Today's date: ${date}
-${calendarSection}
+
 SOURCE MATERIAL:
 ${sourceMaterial}
 
