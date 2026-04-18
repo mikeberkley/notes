@@ -122,9 +122,22 @@ export async function getUnsummarizedSources(
   return results;
 }
 
+export async function indexSourceInFts(
+  db: D1Database,
+  sourceId: string,
+  userId: string,
+  text: string,
+): Promise<void> {
+  await db.prepare('DELETE FROM raw_sources_fts WHERE raw_source_id = ?').bind(sourceId).run();
+  await db.prepare(
+    'INSERT INTO raw_sources_fts (raw_source_id, user_id, text) VALUES (?, ?, ?)'
+  ).bind(sourceId, userId, text).run();
+}
+
 export async function saveSourceSummary(
   db: D1Database,
   sourceId: string,
+  userId: string,
   summary: string,
   keyDecisions: string[],
   keyEntities: string[],
@@ -144,6 +157,10 @@ export async function saveSourceSummary(
     openQuestions,
     sourceId,
   ).run();
+
+  // Index in FTS so source content is searchable
+  const searchText = [summary, keywords.join(' '), keyEntities.join(' ')].join(' ');
+  await indexSourceInFts(db, sourceId, userId, searchText);
 }
 
 export async function saveSourceSummaryError(
@@ -333,49 +350,62 @@ export async function searchSmos(
     return results;
   }
 
-  // Non-empty query: FTS
-  // snippet() works because migration 0005 rebuilt smo_fts without content=''
-  // column -1 picks the best-matching indexed column; <mark> tags are stripped-safe in the UI
-  let sql = `
-    SELECT f.smo_id, f.layer, s.headline,
-           s.date_range_start, s.date_range_end, s.location,
+  // Non-empty query: FTS across SMOs + raw source summaries
+  const ftsQuery = query.trim().split(/\s+/).map(t => `${t}*`).join(' AND ');
+
+  // Query 1: direct SMO matches
+  let smoSql = `
+    SELECT f.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
            (s.summary || ' ' || COALESCE(f.themes_text, '') || ' ' || COALESCE(s.open_questions, '')) as snippet,
            f.rank
     FROM smo_fts f
     INNER JOIN smos s ON s.id = f.smo_id
     WHERE smo_fts MATCH ? AND f.user_id = ?
   `;
-  // Explicit AND between terms + prefix operator so partial input matches full tokens
-  const ftsQuery = query.trim().split(/\s+/).map(t => `${t}*`).join(' AND ');
-  const params: (string | number)[] = [ftsQuery, userId];
+  const smoParams: (string | number)[] = [ftsQuery, userId];
+  if (layer !== undefined) { smoSql += ' AND f.layer = ?'; smoParams.push(layer); }
+  if (fromDate) { smoSql += ' AND s.date_range_start >= ?'; smoParams.push(fromDate); }
+  if (toDate) { smoSql += ' AND s.date_range_start <= ?'; smoParams.push(toDate); }
+  smoSql += ' ORDER BY rank LIMIT ?';
+  smoParams.push(limit);
 
-  if (layer !== undefined) {
-    sql += ' AND f.layer = ?';
-    params.push(layer);
-  }
-  if (fromDate) {
-    sql += ' AND s.date_range_start >= ?';
-    params.push(fromDate);
-  }
-  if (toDate) {
-    sql += ' AND s.date_range_start <= ?';
-    params.push(toDate);
-  }
-
-  sql += ' ORDER BY rank LIMIT ?';
-  params.push(limit);
-
-  const { results } = await db.prepare(sql).bind(...params).all<{
-    smo_id: string;
-    layer: number;
-    headline: string;
-    date_range_start: string;
-    date_range_end: string;
-    location: string | null;
-    snippet: string;
-    rank: number;
+  const { results: smoResults } = await db.prepare(smoSql).bind(...smoParams).all<{
+    smo_id: string; layer: number; headline: string;
+    date_range_start: string; date_range_end: string; location: string | null;
+    snippet: string; rank: number;
   }>();
-  return results;
+
+  // Query 2: source-level matches → parent SMO (exclude SMOs already found above)
+  const alreadyFound = smoResults.map(r => r.smo_id);
+  let srcSql = `
+    SELECT DISTINCT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
+           COALESCE(rs.summary, rs.content) as snippet, NULL as rank
+    FROM raw_sources_fts rsfts
+    INNER JOIN source_pointers sp ON sp.target_id = rsfts.raw_source_id AND sp.target_type = 'raw_source'
+    INNER JOIN smos s ON s.id = sp.smo_id
+    LEFT JOIN raw_sources rs ON rs.id = rsfts.raw_source_id
+    WHERE raw_sources_fts MATCH ? AND rsfts.user_id = ?
+  `;
+  const srcParams: (string | number)[] = [ftsQuery, userId];
+  if (layer !== undefined) { srcSql += ' AND s.layer = ?'; srcParams.push(layer); }
+  if (fromDate) { srcSql += ' AND s.date_range_start >= ?'; srcParams.push(fromDate); }
+  if (toDate) { srcSql += ' AND s.date_range_start <= ?'; srcParams.push(toDate); }
+  if (alreadyFound.length > 0) {
+    srcSql += ` AND sp.smo_id NOT IN (${alreadyFound.map(() => '?').join(',')})`;
+    srcParams.push(...alreadyFound);
+  }
+  srcSql += ' LIMIT ?';
+  srcParams.push(limit - smoResults.length);
+
+  const sourceOnlyResults = smoResults.length < limit
+    ? (await db.prepare(srcSql).bind(...srcParams).all<{
+        smo_id: string; layer: number; headline: string;
+        date_range_start: string; date_range_end: string; location: string | null;
+        snippet: string; rank: number | null;
+      }>()).results
+    : [];
+
+  return [...smoResults, ...sourceOnlyResults];
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────

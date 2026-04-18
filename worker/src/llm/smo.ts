@@ -6,6 +6,7 @@ import {
   getUnsummarizedSources,
   saveSourceSummary,
   saveSourceSummaryError,
+  indexSourceInFts,
   getLayer1SmosForRange,
   getLayer2SmosForRange,
   getSmosByLayerAndDate,
@@ -50,7 +51,13 @@ export function parseSourceSummaryResponse(raw: string): SourceSummaryResponse {
  */
 export async function summarizeRawSources(env: Env, userId: string, date: string): Promise<void> {
   const allUnsummarized = await getUnsummarizedSources(env.DB, userId, date);
-  // Calendar events are pre-structured; no per-source LLM summarization needed
+
+  // Calendar events are pre-structured — index directly in FTS, no LLM needed
+  const calendarSources = allUnsummarized.filter(s => s.source_type === 'gcalendar');
+  for (const cs of calendarSources) {
+    await indexSourceInFts(env.DB, cs.id, userId, cs.content).catch(console.error);
+  }
+
   const sources = allUnsummarized.filter(s => s.source_type !== 'gcalendar');
   if (sources.length === 0) return;
 
@@ -73,6 +80,7 @@ export async function summarizeRawSources(env: Env, userId: string, date: string
       await saveSourceSummary(
         env.DB,
         source.id,
+        userId,
         parsed.summary,
         parsed.key_decisions,
         parsed.key_entities,
