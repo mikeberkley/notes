@@ -54,8 +54,17 @@ export interface SmoDetail {
 
 export interface RawSource {
   id: string;
-  source_type: 'gmail' | 'gdrive';
-  metadata: { subject?: string; sender?: string; filename?: string };
+  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar' | 'slack';
+  metadata: {
+    subject?: string;
+    sender?: string;
+    filename?: string;
+    root_name?: string;
+    title?: string;
+    with_user?: string;
+    channel_name?: string;
+    type?: string;
+  };
   content: string;
 }
 

@@ -8,6 +8,26 @@ const LAYER_COLORS: Record<number, string> = {
   3: 'bg-amber-100 text-amber-700',
 };
 
+function sourceLabel(rs: import('../lib/api.js').RawSource): string {
+  const m = rs.metadata;
+  switch (rs.source_type) {
+    case 'gmail':
+      return `Gmail: ${m.subject ?? '(no subject)'}`;
+    case 'gdrive':
+      return `Drive: ${m.filename ?? 'Untitled'}`;
+    case 'workflowy':
+      return `Workflowy: ${m.root_name ?? 'Note'}`;
+    case 'gcalendar':
+      return `Calendar: ${m.title ?? 'Event'}`;
+    case 'slack':
+      return m.type === 'dm'
+        ? `Slack DM: ${m.with_user ?? 'Unknown'}`
+        : `Slack: #${m.channel_name ?? 'channel'}`;
+    default:
+      return rs.source_type;
+  }
+}
+
 export default function SMODetail() {
   const id = window.location.pathname.split('/').pop() ?? '';
   const [smo, setSmo] = useState<SmoDetail | null>(null);
@@ -24,6 +44,17 @@ export default function SMODetail() {
         setSmo(smoData);
         setChildren(childrenData);
         setSources(sourcesData);
+        // Eagerly load metadata for all raw sources so labels show without expanding
+        const rawSourceIds = sourcesData
+          .filter((s: { target_type: string }) => s.target_type === 'raw_source')
+          .map((s: { target_id: string }) => s.target_id);
+        Promise.all(rawSourceIds.map((sid: string) => api.rawSources.get(sid)))
+          .then(results => {
+            const map: Record<string, typeof results[0]> = {};
+            results.forEach(rs => { map[rs.id] = rs; });
+            setSourceContent(map);
+          })
+          .catch(console.error);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -145,11 +176,7 @@ export default function SMODetail() {
                       className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50"
                     >
                       <div className="text-sm text-gray-700 truncate">
-                        {rs
-                          ? (rs.source_type === 'gmail'
-                            ? `✉ ${rs.metadata.subject ?? 'Email'} — ${rs.metadata.sender ?? ''}`
-                            : `📄 ${rs.metadata.filename ?? 'Drive file'}`)
-                          : `Source ${s.target_id.slice(0, 8)}…`}
+                        {rs ? sourceLabel(rs) : <span className="text-gray-400">Loading…</span>}
                       </div>
                       <span className="text-gray-400 text-xs ml-2">{expanded ? '▲' : '▼'}</span>
                     </button>
