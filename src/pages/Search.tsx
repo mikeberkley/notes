@@ -189,6 +189,28 @@ function MemoryCard({ result, heat, query }: { result: SearchResult; heat?: Heat
         <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
         {!expanded && (() => {
           const snippets = buildSnippets(result.snippet ?? '', query);
+          if (result.source_label) {
+            return (
+              <div className="mt-1.5">
+                <p className="text-xs text-indigo-500 font-medium">↳ {result.source_label}</p>
+                {snippets.length > 0
+                  ? (
+                    <div className="mt-1 space-y-1">
+                      {snippets.map((s, i) => (
+                        <p
+                          key={i}
+                          className="text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5"
+                          dangerouslySetInnerHTML={{ __html: s }}
+                        />
+                      ))}
+                    </div>
+                  )
+                  : result.snippet && (
+                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">{result.snippet.slice(0, 200)}</p>
+                  )}
+              </div>
+            );
+          }
           if (snippets.length === 0) return null;
           return (
             <div className="mt-1.5 space-y-1">

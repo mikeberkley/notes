@@ -326,7 +326,7 @@ export async function searchSmos(
   fromDate?: string,
   toDate?: string,
   limit = 200,
-): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null }>> {
+): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null; source_label?: string }>> {
   // Empty query: list all SMOs sorted by date, no FTS needed
   if (!query.trim()) {
     let sql = `
@@ -379,7 +379,21 @@ export async function searchSmos(
   const alreadyFound = smoResults.map(r => r.smo_id);
   let srcSql = `
     SELECT DISTINCT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
-           COALESCE(rs.summary, rs.content) as snippet, NULL as rank
+           -- Full indexed text so buildSnippets can find the match even if it's only in entities/keywords
+           (COALESCE(rs.summary, '') || ' ' || COALESCE(rs.key_entities, '') || ' ' || COALESCE(rs.keywords, '') || ' ' || COALESCE(rs.content, '')) as snippet,
+           NULL as rank,
+           -- Human-readable source label for UI display
+           CASE rs.source_type
+             WHEN 'gmail'     THEN 'Gmail: '    || COALESCE(json_extract(rs.metadata, '$.subject'), '(no subject)')
+             WHEN 'gdrive'    THEN 'Drive: '    || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
+             WHEN 'workflowy' THEN 'Workflowy: '|| COALESCE(json_extract(rs.metadata, '$.root_name'), 'Note')
+             WHEN 'gcalendar' THEN 'Calendar: ' || COALESCE(json_extract(rs.metadata, '$.title'), 'Event')
+             WHEN 'slack' THEN CASE json_extract(rs.metadata, '$.type')
+               WHEN 'dm' THEN 'Slack DM: ' || COALESCE(json_extract(rs.metadata, '$.with_user'), 'Unknown')
+               ELSE 'Slack: #'  || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')
+             END
+             ELSE rs.source_type
+           END as source_label
     FROM raw_sources_fts rsfts
     INNER JOIN source_pointers sp ON sp.target_id = rsfts.raw_source_id AND sp.target_type = 'raw_source'
     INNER JOIN smos s ON s.id = sp.smo_id
@@ -401,7 +415,7 @@ export async function searchSmos(
     ? (await db.prepare(srcSql).bind(...srcParams).all<{
         smo_id: string; layer: number; headline: string;
         date_range_start: string; date_range_end: string; location: string | null;
-        snippet: string; rank: number | null;
+        snippet: string; rank: number | null; source_label: string;
       }>()).results
     : [];
 

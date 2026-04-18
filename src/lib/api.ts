@@ -30,6 +30,7 @@ export interface SearchResult {
   location: string | null;
   snippet: string;
   rank: number | null;
+  source_label?: string; // present for source-level matches
 }
 
 export interface Theme {
