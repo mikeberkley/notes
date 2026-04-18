@@ -98,7 +98,7 @@ export async function ingestWorkflowy(
   const childMap = buildChildMap(nodes);
 
   const cutoff = Date.now() / 1000 - 24 * 60 * 60;
-  const recentNodes = nodes.filter(n => n.createdAt >= cutoff && n.name?.trim());
+  const recentNodes = nodes.filter(n => (n.createdAt >= cutoff || n.modifiedAt >= cutoff) && n.name?.trim());
 
   // Group recently-created nodes by their root ancestor
   const rootIds = new Set(recentNodes.map(n => findRoot(n.id, nodeById).id));
