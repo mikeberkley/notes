@@ -196,15 +196,8 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
         const snippetClass = 'text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5';
         const smoSnippets = buildSnippets(result.snippet ?? '', query);
         if (sources.length > 0) {
-          // SMO-level match: sources have no snippets of their own — show the SMO context first
-          const hasSourceSnippets = sources.some(src => src.snippet);
           return (
             <div className="px-4 pb-3 space-y-2">
-              {!hasSourceSnippets && smoSnippets.length > 0 && (
-                <div className="space-y-1">
-                  {smoSnippets.map((s, i) => <p key={i} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}
-                </div>
-              )}
               {sources.map((src, i) => {
                 const snippets = buildSnippets(src.snippet ?? '', query);
                 return (
