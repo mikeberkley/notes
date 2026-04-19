@@ -435,12 +435,15 @@ For each user with a valid Google refresh token:
   │   Sub-folders are always descended regardless of their own modifiedTime — only
   │   files are filtered by modifiedTime (Drive doesn't reliably update a folder's
   │   modifiedTime when a child file changes)
+  ├── Folder path tracked during traversal — each file's metadata includes
+  │   folder_path (e.g. "Research" or "Work/Research") relative to the configured root
   ├── For each file modified within the last 24 hours (rolling window, timezone-independent):
   │   ├── Google Docs / Google Slides → Drive export API as text/plain
   │   ├── .txt / .md                  → download raw
   │   └── .docx / .doc / .pdf        → Drive text export (best-effort; raw UTF-8 download as fallback)
   └── Insert into raw_sources (source_type='gdrive')
        externalId = fileId::modifiedTime (re-ingests if file is updated within the window)
+       metadata = { filename, mime_type, modified_time, folder_path }
 
   Workflowy ingestion (worker/src/ingestion/workflowy.ts)
   ├── Skipped if workflowy_api_key not set in user config
@@ -547,6 +550,11 @@ Key prompt rules:
 - `key_entities` covers proper nouns AND named projects/initiatives/strategies
 - `open_questions` is an **array of strings** (one item per unresolved thing; does not need to be phrased as a question) or `null`
 - Workflowy sources get extra instruction: treat each bullet as discrete, copy named items exactly
+- **Drive files in a folder named `Research`** (any path segment, case-insensitive, e.g. `Research` or `Work/Research`) use a dedicated research prompt variant:
+  - Label: `RESEARCH DOCUMENT` instead of `DRIVE FILE`
+  - `key_decisions` forced to `[]`, `open_questions` forced to `null`
+  - Summary focuses on insights, findings, and knowledge rather than personal decisions
+  - `keywords` and `key_entities` capture topics, concepts, frameworks, people, and organizations
 
 Raw content is truncated to 80,000 chars (~20k tokens) before sending. Results are saved back to `raw_sources` (`summarized_at` timestamp prevents re-processing). On failure, `summary_error` is recorded and the source falls back to truncated raw content (4,000 chars) in the Layer 1 prompt.
 
