@@ -143,7 +143,6 @@ export async function saveSourceSummary(
   keyEntities: string[],
   keywords: string[],
   openQuestions: string | null,
-  content?: string,
 ): Promise<void> {
   await db.prepare(`
     UPDATE raw_sources
@@ -159,8 +158,8 @@ export async function saveSourceSummary(
     sourceId,
   ).run();
 
-  // Index LLM-generated fields + raw content so all source text is searchable
-  const searchText = [summary, keywords.join(' '), keyEntities.join(' '), content ?? ''].join(' ');
+  // Index LLM-generated fields only — raw content is not indexed for precision
+  const searchText = [summary, keywords.join(' '), keyEntities.join(' ')].join(' ');
   await indexSourceInFts(db, sourceId, userId, searchText);
 }
 
