@@ -352,157 +352,29 @@ export async function searchSmos(
     return results;
   }
 
-  // Non-empty query: FTS across SMOs + raw source summaries
+  // Non-empty search: source-level matches take priority over SMO-level matches.
+  // Source matches show clickable links with snippets; SMO-only matches show snippet context only.
   const trimmed = query.trim();
   const ftsQuery = trimmed.includes(' ') ? `"${trimmed}"` : `${trimmed}*`;
   const queryWords = trimmed.toLowerCase().replace(/['"]/g, '').split(/\s+/).filter(Boolean);
 
-  // Query 1: direct SMO matches
-  let smoSql = `
-    SELECT f.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
-           (s.summary || ' ' || COALESCE(f.keywords, '') || ' ' || COALESCE(f.key_entities, '') || ' ' || COALESCE(f.themes_text, '') || ' ' || COALESCE(s.open_questions, '')) as snippet,
-           f.rank
-    FROM smo_fts f
-    INNER JOIN smos s ON s.id = f.smo_id
-    WHERE smo_fts MATCH ? AND f.user_id = ?
-  `;
-  const smoParams: (string | number)[] = [ftsQuery, userId];
-  if (layer !== undefined) { smoSql += ' AND f.layer = ?'; smoParams.push(layer); }
-  if (fromDate) { smoSql += ' AND s.date_range_start >= ?'; smoParams.push(fromDate); }
-  if (toDate) { smoSql += ' AND s.date_range_start <= ?'; smoParams.push(toDate); }
-  smoSql += ' ORDER BY rank LIMIT ?';
-  smoParams.push(limit);
-
-  const { results: smoResults } = await db.prepare(smoSql).bind(...smoParams).all<{
-    smo_id: string; layer: number; headline: string;
-    date_range_start: string; date_range_end: string; location: string | null;
-    snippet: string; rank: number;
-  }>();
-
-  // Deduplicate SMO results (FTS table may have multiple rows per smo_id from migrations)
-  const seen = new Set<string>();
-  const dedupedSmoResults = smoResults.filter(r => {
-    if (seen.has(r.smo_id)) return false;
-    seen.add(r.smo_id);
-    return true;
-  });
-
-  // For SMO-level matches: prefer sources that also match the keyword (with snippets);
-  // fall back to all linked sources as plain links if none match.
-  type SourceRow = { smo_id: string; source_type: string; metadata: string; external_id: string; snippet: string; source_label: string; source_url: string | null };
-  const SOURCE_LABEL_SQL = `CASE rs.source_type
-    WHEN 'gmail'     THEN 'Gmail: '     || COALESCE(json_extract(rs.metadata, '$.subject'), '(no subject)')
-    WHEN 'gdrive'    THEN 'Drive: '     || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
-    WHEN 'workflowy' THEN 'Workflowy: ' || COALESCE(json_extract(rs.metadata, '$.root_name'), 'Note')
-    WHEN 'gcalendar' THEN 'Calendar: '  || COALESCE(json_extract(rs.metadata, '$.title'), 'Event')
-    WHEN 'slack' THEN CASE json_extract(rs.metadata, '$.type')
-      WHEN 'dm' THEN 'Slack DM: ' || COALESCE(json_extract(rs.metadata, '$.with_user'), 'Unknown')
-      ELSE 'Slack: #' || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')
-    END
-    ELSE rs.source_type
-  END`;
-  const SOURCE_URL_SQL = `CASE rs.source_type
-    WHEN 'gmail'     THEN 'https://mail.google.com/mail/u/0/#inbox/' || rs.external_id
-    WHEN 'gdrive'    THEN 'https://drive.google.com/file/d/' ||
-                          CASE WHEN INSTR(rs.external_id, '::') > 0
-                            THEN SUBSTR(rs.external_id, 1, INSTR(rs.external_id, '::') - 1)
-                            ELSE rs.external_id
-                          END || '/view'
-    WHEN 'workflowy' THEN 'https://workflowy.com/#' || COALESCE(json_extract(rs.metadata, '$.root_node_id'), '')
-    WHEN 'gcalendar' THEN 'https://calendar.google.com/calendar/r'
-    WHEN 'slack'     THEN CASE json_extract(rs.metadata, '$.type')
-      WHEN 'channel' THEN 'https://app.slack.com/archives/' ||
-                           SUBSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2), 1,
-                             INSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2) || '::', '::') - 1)
-      ELSE NULL
-    END
-    ELSE NULL
-  END`;
-
-  let expandedSmoResults: typeof dedupedSmoResults = [];
-  if (dedupedSmoResults.length > 0) {
-    const smoIds = dedupedSmoResults.map(r => r.smo_id);
-    const inClause = smoIds.map(() => '?').join(',');
-
-    // Query A: sources that also match the keyword via FTS (preferred — include snippets)
-    const { results: ftsSources } = await db.prepare(`
-      SELECT DISTINCT sp.smo_id, rs.source_type, rs.metadata, rs.external_id,
-             (COALESCE(rs.summary, '') || ' ' || COALESCE(rs.key_entities, '') || ' ' || COALESCE(rs.keywords, '')) as snippet,
-             ${SOURCE_LABEL_SQL} as source_label,
-             ${SOURCE_URL_SQL} as source_url
-      FROM raw_sources_fts rsfts
-      INNER JOIN raw_sources rs ON rs.id = rsfts.raw_source_id
-      INNER JOIN source_pointers sp ON sp.target_id = rs.id AND sp.target_type = 'raw_source'
-      WHERE raw_sources_fts MATCH ? AND rsfts.user_id = ? AND sp.smo_id IN (${inClause})
-    `).bind(ftsQuery, userId, ...smoIds).all<SourceRow>();
-
-    // Query B: all linked sources (fallback when FTS finds nothing for a given SMO)
-    const { results: allSources } = await db.prepare(`
-      SELECT DISTINCT sp.smo_id, rs.source_type, rs.metadata, rs.external_id,
-             '' as snippet,
-             ${SOURCE_LABEL_SQL} as source_label,
-             ${SOURCE_URL_SQL} as source_url
-      FROM source_pointers sp
-      INNER JOIN raw_sources rs ON rs.id = sp.target_id AND sp.target_type = 'raw_source'
-      WHERE sp.smo_id IN (${inClause}) AND rs.user_id = ?
-    `).bind(...smoIds, userId).all<SourceRow>();
-
-    // Resolve Workflowy deep-links
-    for (const src of [...ftsSources, ...allSources]) {
-      if (src.source_type === 'workflowy' && src.metadata) {
-        try {
-          const meta = JSON.parse(src.metadata) as { node_index?: [string, string][]; root_node_id?: string };
-          const match = (meta.node_index ?? []).find(([, text]) => queryWords.some(w => text.toLowerCase().includes(w)));
-          if (match) src.source_url = `https://workflowy.com/#${match[0]}`;
-        } catch { /* leave root URL */ }
-      }
-    }
-
-    const ftsSourcesBySmo = new Map<string, SourceRow[]>();
-    for (const src of ftsSources) {
-      const arr = ftsSourcesBySmo.get(src.smo_id) ?? [];
-      arr.push(src);
-      ftsSourcesBySmo.set(src.smo_id, arr);
-    }
-    const allSourcesBySmo = new Map<string, SourceRow[]>();
-    for (const src of allSources) {
-      const arr = allSourcesBySmo.get(src.smo_id) ?? [];
-      arr.push(src);
-      allSourcesBySmo.set(src.smo_id, arr);
-    }
-
-    for (const smo of dedupedSmoResults) {
-      expandedSmoResults.push(smo);
-      const sources = ftsSourcesBySmo.get(smo.smo_id)?.length
-        ? ftsSourcesBySmo.get(smo.smo_id)!       // keyword matched — show with snippets
-        : allSourcesBySmo.get(smo.smo_id) ?? [];  // fallback — show all as plain links
-      for (const src of sources) {
-        expandedSmoResults.push({ ...smo, snippet: src.snippet, source_label: src.source_label, source_url: src.source_url } as typeof smo & { source_label: string; source_url: string | null });
-      }
-    }
-  }
-
-  // Query 2: source-level matches → parent SMO (exclude SMOs already found above)
-  const alreadyFound = dedupedSmoResults.map(r => r.smo_id);
+  // Query 1: source-level FTS matches (primary)
   let srcSql = `
     SELECT DISTINCT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
            rs.source_type, rs.metadata,
-           -- Full indexed text so buildSnippets can find the match even if it's only in entities/keywords
            (COALESCE(rs.summary, '') || ' ' || COALESCE(rs.key_entities, '') || ' ' || COALESCE(rs.keywords, '') || ' ' || COALESCE(rs.content, '')) as snippet,
            NULL as rank,
-           -- Human-readable source label for UI display
            CASE rs.source_type
-             WHEN 'gmail'     THEN 'Gmail: '    || COALESCE(json_extract(rs.metadata, '$.subject'), '(no subject)')
-             WHEN 'gdrive'    THEN 'Drive: '    || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
-             WHEN 'workflowy' THEN 'Workflowy: '|| COALESCE(json_extract(rs.metadata, '$.root_name'), 'Note')
-             WHEN 'gcalendar' THEN 'Calendar: ' || COALESCE(json_extract(rs.metadata, '$.title'), 'Event')
+             WHEN 'gmail'     THEN 'Gmail: '     || COALESCE(json_extract(rs.metadata, '$.subject'), '(no subject)')
+             WHEN 'gdrive'    THEN 'Drive: '     || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
+             WHEN 'workflowy' THEN 'Workflowy: ' || COALESCE(json_extract(rs.metadata, '$.root_name'), 'Note')
+             WHEN 'gcalendar' THEN 'Calendar: '  || COALESCE(json_extract(rs.metadata, '$.title'), 'Event')
              WHEN 'slack' THEN CASE json_extract(rs.metadata, '$.type')
                WHEN 'dm' THEN 'Slack DM: ' || COALESCE(json_extract(rs.metadata, '$.with_user'), 'Unknown')
-               ELSE 'Slack: #'  || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')
+               ELSE 'Slack: #' || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')
              END
              ELSE rs.source_type
            END as source_label,
-           -- Direct URL to the source
            CASE rs.source_type
              WHEN 'gmail'     THEN 'https://mail.google.com/mail/u/0/#inbox/' || rs.external_id
              WHEN 'gdrive'    THEN 'https://drive.google.com/file/d/' ||
@@ -530,29 +402,22 @@ export async function searchSmos(
   if (layer !== undefined) { srcSql += ' AND s.layer = ?'; srcParams.push(layer); }
   if (fromDate) { srcSql += ' AND s.date_range_start >= ?'; srcParams.push(fromDate); }
   if (toDate) { srcSql += ' AND s.date_range_start <= ?'; srcParams.push(toDate); }
-  if (alreadyFound.length > 0) {
-    srcSql += ` AND sp.smo_id NOT IN (${alreadyFound.map(() => '?').join(',')})`;
-    srcParams.push(...alreadyFound);
-  }
   srcSql += ' LIMIT ?';
-  srcParams.push(limit - dedupedSmoResults.length);
+  srcParams.push(limit);
 
-  const sourceOnlyResults = dedupedSmoResults.length < limit
-    ? (await db.prepare(srcSql).bind(...srcParams).all<{
-        smo_id: string; layer: number; headline: string;
-        date_range_start: string; date_range_end: string; location: string | null;
-        snippet: string; rank: number | null; source_label: string; source_url: string | null;
-        source_type: string; metadata: string;
-      }>()).results
-    : [];
+  const { results: sourceResults } = await db.prepare(srcSql).bind(...srcParams).all<{
+    smo_id: string; layer: number; headline: string;
+    date_range_start: string; date_range_end: string; location: string | null;
+    snippet: string; rank: number | null; source_label: string; source_url: string | null;
+    source_type: string; metadata: string;
+  }>();
 
-  // Resolve Workflowy source URLs to the specific matching node when node_index is available
-  for (const r of sourceOnlyResults) {
+  // Resolve Workflowy deep-links for source matches
+  for (const r of sourceResults) {
     if (r.source_type === 'workflowy' && r.metadata) {
       try {
         const meta = JSON.parse(r.metadata) as { node_index?: [string, string][] };
-        const nodeIndex = meta.node_index ?? [];
-        const match = nodeIndex.find(([, text]) =>
+        const match = (meta.node_index ?? []).find(([, text]) =>
           queryWords.some(word => text.toLowerCase().includes(word))
         );
         if (match) r.source_url = `https://workflowy.com/#${match[0]}`;
@@ -560,7 +425,48 @@ export async function searchSmos(
     }
   }
 
-  return [...expandedSmoResults, ...sourceOnlyResults];
+  // SMO IDs already covered by source-level matches
+  const smoIdsFromSources = new Set(sourceResults.map(r => r.smo_id));
+
+  // Query 2: SMO-level FTS matches for SMOs not already found via sources (secondary)
+  // These show snippet context only — no source links
+  let smoSql = `
+    SELECT f.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
+           (s.summary || ' ' || COALESCE(f.keywords, '') || ' ' || COALESCE(f.key_entities, '') || ' ' || COALESCE(f.themes_text, '') || ' ' || COALESCE(s.open_questions, '')) as snippet,
+           f.rank
+    FROM smo_fts f
+    INNER JOIN smos s ON s.id = f.smo_id
+    WHERE smo_fts MATCH ? AND f.user_id = ?
+  `;
+  const smoParams: (string | number)[] = [ftsQuery, userId];
+  if (layer !== undefined) { smoSql += ' AND f.layer = ?'; smoParams.push(layer); }
+  if (fromDate) { smoSql += ' AND s.date_range_start >= ?'; smoParams.push(fromDate); }
+  if (toDate) { smoSql += ' AND s.date_range_start <= ?'; smoParams.push(toDate); }
+  if (smoIdsFromSources.size > 0) {
+    smoSql += ` AND f.smo_id NOT IN (${[...smoIdsFromSources].map(() => '?').join(',')})`;
+    smoParams.push(...smoIdsFromSources);
+  }
+  smoSql += ' ORDER BY rank LIMIT ?';
+  smoParams.push(limit - sourceResults.length);
+
+  const { results: smoResults } = sourceResults.length < limit
+    ? await db.prepare(smoSql).bind(...smoParams).all<{
+        smo_id: string; layer: number; headline: string;
+        date_range_start: string; date_range_end: string; location: string | null;
+        snippet: string; rank: number;
+      }>()
+    : { results: [] };
+
+  // Deduplicate SMO-only results (FTS table may have multiple rows per smo_id)
+  const seenSmo = new Set<string>();
+  const dedupedSmoResults = smoResults.filter(r => {
+    if (seenSmo.has(r.smo_id)) return false;
+    seenSmo.add(r.smo_id);
+    return true;
+  });
+
+  // Source matches first, then SMO-only matches (snippet context, no source links)
+  return [...sourceResults, ...dedupedSmoResults];
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
