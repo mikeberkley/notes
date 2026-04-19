@@ -189,38 +189,40 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
           </div>
         </div>
         <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
-        {!expanded && (() => {
-          const snippetClass = 'text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5';
-          if (sources.length > 0) {
-            return (
-              <div className="mt-1.5 space-y-2">
-                {sources.map((src, i) => {
-                  const snippets = buildSnippets(src.snippet ?? '', query);
-                  return (
-                    <div key={i}>
-                      {src.source_url
-                        ? <a href={src.source_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-xs text-indigo-500 font-medium hover:underline">↳ {src.source_label}</a>
-                        : <p className="text-xs text-indigo-500 font-medium">↳ {src.source_label}</p>
-                      }
-                      {snippets.length > 0
-                        ? <div className="mt-1 space-y-1">{snippets.map((s, j) => <p key={j} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}</div>
-                        : src.snippet && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{src.snippet.slice(0, 200)}</p>
-                      }
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          }
-          const snippets = buildSnippets(result.snippet ?? '', query);
-          if (snippets.length === 0) return null;
+      </button>
+
+      {/* Snippets — outside the button so source links are not intercepted */}
+      {!expanded && (() => {
+        const snippetClass = 'text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5';
+        if (sources.length > 0) {
           return (
-            <div className="mt-1.5 space-y-1">
-              {snippets.map((s, i) => <p key={i} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}
+            <div className="px-4 pb-3 space-y-2">
+              {sources.map((src, i) => {
+                const snippets = buildSnippets(src.snippet ?? '', query);
+                return (
+                  <div key={i}>
+                    {src.source_url
+                      ? <a href={src.source_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-500 font-medium hover:underline">↳ {src.source_label}</a>
+                      : <p className="text-xs text-indigo-500 font-medium">↳ {src.source_label}</p>
+                    }
+                    {snippets.length > 0
+                      ? <div className="mt-1 space-y-1">{snippets.map((s, j) => <p key={j} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}</div>
+                      : src.snippet && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{src.snippet.slice(0, 200)}</p>
+                    }
+                  </div>
+                );
+              })}
             </div>
           );
-        })()}
-      </button>
+        }
+        const snippets = buildSnippets(result.snippet ?? '', query);
+        if (snippets.length === 0) return null;
+        return (
+          <div className="px-4 pb-3 space-y-1">
+            {snippets.map((s, i) => <p key={i} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}
+          </div>
+        );
+      })()}
 
       {/* Expanded detail */}
       {expanded && detail && (
