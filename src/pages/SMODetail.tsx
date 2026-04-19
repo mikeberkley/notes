@@ -133,7 +133,12 @@ export default function SMODetail() {
         {smo.open_questions && (
           <section className="bg-amber-50 border border-amber-200 rounded-xl p-4">
             <h2 className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">Open Questions</h2>
-            <p className="text-sm text-amber-900">{smo.open_questions}</p>
+            <ul className="list-disc list-inside space-y-1">
+              {smo.open_questions.split(/\?\s+/).map((q, i, arr) => {
+                const text = (q.trim() + (i < arr.length - 1 || !q.trim().endsWith('?') ? '?' : '')).trim();
+                return text.length > 1 ? <li key={i} className="text-sm text-amber-900">{text}</li> : null;
+              })}
+            </ul>
           </section>
         )}
 
