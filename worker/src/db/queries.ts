@@ -158,8 +158,8 @@ export async function saveSourceSummary(
     sourceId,
   ).run();
 
-  // Index LLM-generated fields only — raw content is not indexed for precision
-  const searchText = [summary, keywords.join(' '), keyEntities.join(' ')].join(' ');
+  // Index all LLM-generated fields (summary, keywords, entities, decisions, open questions)
+  const searchText = [summary, keywords.join(' '), keyEntities.join(' '), keyDecisions.join(' '), openQuestions ?? ''].join(' ');
   await indexSourceInFts(db, sourceId, userId, searchText);
 }
 
