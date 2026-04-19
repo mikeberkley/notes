@@ -1,6 +1,6 @@
 # Notes App — Architecture & Implementation Reference
 
-**Last updated:** 2026-04-17  
+**Last updated:** 2026-04-19  
 **Status:** Built and deployed ✅
 
 ---
@@ -208,7 +208,9 @@ CREATE TABLE smos (
   summary           TEXT NOT NULL,
   keywords          TEXT NOT NULL,        -- JSON array
   key_entities      TEXT NOT NULL,        -- JSON array
-  open_questions    TEXT,
+  key_decisions     TEXT,                 -- JSON array (migration 0009)
+  open_questions    TEXT,                 -- newline-separated list of items
+  location          TEXT,                 -- "City, Country" inferred from calendar (migration 0006)
   date_range_start  DATE NOT NULL,
   date_range_end    DATE NOT NULL,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -234,7 +236,7 @@ CREATE TABLE source_pointers (
   PRIMARY KEY (smo_id, target_type, target_id)
 );
 
--- Full-text search (FTS5)
+-- Full-text search (FTS5) — SMO level
 -- content='' was removed (migration 0005) — contentless tables don't store UNINDEXED
 -- columns, breaking JOINs. The table now stores its own copy of all columns.
 CREATE VIRTUAL TABLE smo_fts USING fts5(
@@ -248,7 +250,30 @@ CREATE VIRTUAL TABLE smo_fts USING fts5(
   themes_text,
   open_questions
 );
+
+-- Full-text search (FTS5) — source level (migration 0007)
+-- Indexes LLM-generated summary fields; populated by saveSourceSummary()
+-- and directly for gcalendar sources (no LLM summarization).
+CREATE VIRTUAL TABLE raw_sources_fts USING fts5(
+  raw_source_id  UNINDEXED,
+  user_id        UNINDEXED,
+  text           -- summary + keywords + key_entities (concatenated)
+);
 ```
+
+### Applied migrations
+
+| Migration | What it does |
+|---|---|
+| `0001_initial.sql` | Base schema (all tables above) |
+| `0002_source_summaries.sql` | Add `summary`, `key_decisions`, `key_entities`, `keywords`, `open_questions`, `summarized_at` to `raw_sources` |
+| `0003_source_summary_error.sql` | Add `summary_error` column to `raw_sources` for logging LLM failures |
+| `0004_fts_add_summary.sql` | Backfill `smo_fts` with summary data |
+| `0005_fts_fix_contentless.sql` | Rebuild `smo_fts` as non-contentless (fix UNINDEXED column issue) |
+| `0006_add_location.sql` | Add `location` column to `smos`; add `location` to `smo_fts` |
+| `0007_raw_sources_fts.sql` | Create `raw_sources_fts` virtual table; populate from summarized sources |
+| `0008_raw_sources_fts_include_content.sql` | Re-index `raw_sources_fts` (LLM summary fields only; content excluded for precision) |
+| `0009_smos_key_decisions.sql` | Add `key_decisions TEXT` column to `smos` |
 
 ---
 
@@ -443,20 +468,62 @@ LLM responses are stripped of any markdown code fences before `JSON.parse()`. If
 
 ---
 
-## 11. LLM Prompt Design
+## 11. Search
+
+### FTS Query Construction
+- Single-word query → prefix match (`term*`) — catches stemmed variants
+- Multi-word query → exact phrase match (`"exact phrase"`) — avoids false positives
+- Uses FTS5 porter stemming tokenizer on `smo_fts` and `raw_sources_fts`
+
+### Two-tier result model
+
+**Tier 1 — Source-level matches (primary)**  
+When the keyword is found in `raw_sources_fts` (summary + key_entities + keywords of raw sources), the result surfaces with:
+- Clickable source label linking to the original document (Gmail, Drive, Workflowy, Calendar, Slack)
+- Keyword-highlighted snippet from the source's indexed text
+- Workflowy links resolve to the specific matching bullet node via the `node_index` stored in metadata
+
+**Tier 2 — SMO-only matches (secondary)**  
+When the keyword is found only in `smo_fts` (SMO summary, themes, keywords — LLM-generated text) but not in any indexed source, the card shows:
+- Keyword-highlighted snippet from the SMO's text
+- No source links (sources didn't match — showing all would be noise)
+
+An SMO already found via Tier 1 is excluded from Tier 2 (no duplicate cards).
+
+### Composite rank ordering
+Results are sorted by a composite score computed per SMO:
+1. **Best individual source rank** — maximum (least-negative) BM25 score across all matching sources for that SMO. Uses `MAX(rsfts.rank)` via `GROUP BY sp.smo_id, rs.id` in SQL.
+2. **Match count tiebreaker** — SMOs with more matching sources rank higher when best ranks are equal.
+
+SMO-only results (Tier 2) are merged into the sorted list at their own FTS rank. All groups sorted descending (less-negative = better match = first).
+
+### Source indexing strategy
+`raw_sources_fts` indexes LLM-generated fields only (`summary + key_entities + keywords`) — raw content is excluded to maintain search precision. The key prompt engineering rule — capture verbatim named items as keywords — is what makes phrase searches reliable without content indexing.
+
+---
+
+## 12. LLM Prompt Design
 
 **Model:** `OPENROUTER_MODEL` env var (currently `anthropic/claude-sonnet-4-6`). To swap: update the var in `wrangler.toml` and redeploy — no code changes needed.
 
-### Per-source summarization prompt (new — runs before Layer 1)
-Each raw source is summarized individually in a focused LLM call:
+### Per-source summarization prompt (runs before Layer 1)
+Each raw source is summarized individually in a focused LLM call. Calendar events (`gcalendar`) are indexed directly without LLM summarization.
+```json
+{
+  "summary": "2–4 sentences about this document/email",
+  "key_decisions": ["concrete decisions made or agreed upon"],
+  "key_entities": ["people, orgs, named projects, initiatives, strategies"],
+  "keywords": ["5–15 specific keywords including verbatim named items"],
+  "open_questions": ["array of unresolved items"] // null if none
+}
 ```
-{summary: "2–4 sentences about this document/email",
- key_decisions: ["concrete decisions made"],
- key_entities: ["proper nouns — people, orgs, projects"],
- keywords: ["3–8 specific topic keywords"],
- open_questions: "unresolved items or null"}
-```
-Raw content is truncated to 80,000 chars (~20k tokens) before sending. Results are saved back to `raw_sources` (`summarized_at` timestamp prevents re-processing).
+Key prompt rules:
+- `keywords` must include **verbatim** multi-word phrases for named items (e.g. "ICP refinement", "Accelerate internal development") — do not paraphrase
+- `key_entities` covers proper nouns AND named projects/initiatives/strategies
+- `open_questions` is an **array of strings** (one item per unresolved thing; does not need to be phrased as a question) or `null`
+- Workflowy sources get extra instruction: treat each bullet as discrete, copy named items exactly
+
+Raw content is truncated to 80,000 chars (~20k tokens) before sending. Results are saved back to `raw_sources` (`summarized_at` timestamp prevents re-processing). On failure, `summary_error` is recorded and the source falls back to truncated raw content (4,000 chars) in the Layer 1 prompt.
 
 ### Layer 1 system prompt
 > You are a memory assistant. Respond ONLY with a single valid JSON object. No markdown, no explanation, no extra text — just the JSON.
@@ -484,26 +551,33 @@ Generate a structured memory object conforming EXACTLY to this JSON schema:
   "headline": "one sentence — most important thing about this day",
   "summary": "one paragraph (3-6 sentences)",
   "themes": [{ "headline": "...", "summary": "EXACTLY 2 sentences" }],  // 1–5 items
-  "keywords": ["string"],       // 5–15
-  "key_entities": ["string"],   // people, projects, orgs, places
-  "open_questions": "string | null"
+  "keywords": ["string"],         // 5–15
+  "key_entities": ["string"],     // people, projects, orgs, places
+  "key_decisions": ["string"],    // concrete decisions made; empty array if none
+  "open_questions": ["string"] | null,  // array of unresolved items; null if none
+  "location": "City, Country | null"    // inferred from calendar events
 }
 ```
 Fallback: if a source's summarization failed, its raw content is truncated to 4,000 chars and used instead.
+
+**Storage of `open_questions`:** The LLM returns an array; the parser joins items with `\n` for storage in the `TEXT` column. The frontend splits on `\n` to render bullet points.
+
+**Storage of `key_decisions`:** Stored as a JSON array string in the `key_decisions TEXT` column on `smos`.
 
 ### Layer 2/3 rollup prompt
 ```
 {Weekly|Monthly} rollup covering {start} to {end}
 
 CHILD MEMORY OBJECTS (JSON):
-[...serialized child SMOs with themes...]
+[...serialized child SMOs including key_decisions...]
 
-Generate a single memory object summarizing the entire period. Synthesize — do not just repeat.
+Generate a single memory object using the same schema as Layer 1, summarizing the entire period.
+Synthesize across all child objects — do not just repeat them.
 ```
 
 ---
 
-## 12. Cron Schedule
+## 13. Cron Schedule
 
 | Job | UTC | EDT (Mar–Nov) | EST (Nov–Mar) |
 |---|---|---|---|
@@ -514,7 +588,7 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 
 ---
 
-## 13. Session & Security
+## 14. Session & Security
 
 - **Browser sessions:** HS256 JWT signed with `SESSION_SECRET`, stored in `httpOnly; Secure; SameSite=Lax` cookie. 24-hour expiry. Hand-rolled (no `jose` dependency — Workers crypto API used directly).
 - **Agent API keys:** Raw key shown once on creation. Stored as SHA-256 hash in D1 via `crypto.subtle.digest`. Incoming `Bearer` token is hashed and compared — plaintext never persisted.
@@ -524,7 +598,7 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 
 ---
 
-## 14. Environment Variables & Secrets
+## 15. Environment Variables & Secrets
 
 ### Worker secrets (set via `wrangler secret put` from `worker/`)
 
@@ -551,7 +625,7 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 
 ---
 
-## 15. Frontend Pages
+## 16. Frontend Pages
 
 ### Login (`/`)
 - "Sign in with Google" button → redirects to `/api/auth/google`
@@ -560,11 +634,15 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 ### Search (`/search`) — index page after login
 - Search bar + Enter key support
 - Layer filter chips (All / Layer 1 Day / Layer 2 Week / Layer 3 Month)
-- Date range pickers
-- Results: headline, date range, layer badge, FTS snippet with `<b>` highlights
+- Date range pickers (calendar icon on left side of each field)
+- Results ranked by composite FTS score (see §11 Search above)
+- SMO cards show: headline, date, location, layer badge, match snippets with keyword highlights
+- Expanded card: summary, themes, key entities, key decisions (green), open questions (amber bullets)
+- Source links (clickable, open in new tab): shown when source-level FTS matches found;
+  Workflowy links deep-link to the specific matching bullet node
 
 ### SMO Detail (`/smo/:id`)
-- Full SMO: headline, summary, themes, keywords, key entities, open questions
+- Full SMO: headline, summary, themes, keywords, key entities, key decisions (green), open questions (amber bullets)
 - Child SMOs (Layer 3 → L2, Layer 2 → L1) as clickable cards
 - Raw sources: collapsed by default, click to expand full content
 
@@ -577,7 +655,7 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 
 ---
 
-## 16. Deployment
+## 17. Deployment
 
 ### Worker (from `worker/` directory)
 
@@ -623,7 +701,7 @@ VITE_API_URL=http://localhost:8787
 
 ---
 
-## 17. Tests
+## 18. Tests
 
 ### Framework
 
@@ -695,7 +773,7 @@ The two JSON parsers (`parseLLMResponse`, `parseSourceSummaryResponse`) are the 
 
 ---
 
-## 18. First-Run Checklist
+## 19. First-Run Checklist
 
 After deployment, complete these steps once:
 
@@ -707,7 +785,7 @@ After deployment, complete these steps once:
 
 ---
 
-## 19. Future Enhancements (not in MVP)
+## 20. Future Enhancements (not in MVP)
 
 - Daily brief email (morning summary)
 - Google Calendar ingestion
