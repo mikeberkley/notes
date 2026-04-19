@@ -74,26 +74,26 @@ function buildSnippets(text: string, rawQuery: string, maxSnippets = 5, windowCh
     .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   if (terms.length === 0) return [];
 
-  const termRegexes = terms.map(t => new RegExp(t, 'i'));
-  const anyTermPattern = new RegExp(terms.join('|'), 'gi');
+  // Use prefix matching so porter-stemmed variants (e.g. "usability" for "usable") are found.
+  // For words > 5 chars, match on the first ~70% of chars; shorter words match exactly.
+  const prefixTerms = terms.map(t => t.length > 5 ? t.slice(0, Math.ceil(t.length * 0.7)) : t);
 
-  // Collect every position where any term matches
+  const prefixRegexes = prefixTerms.map(t => new RegExp(t, 'i'));
+  const anyPrefixPattern = new RegExp(prefixTerms.join('|'), 'gi');
+
   const matchPositions: number[] = [];
   let m: RegExpExecArray | null;
-  while ((m = anyTermPattern.exec(text)) !== null) matchPositions.push(m.index);
+  while ((m = anyPrefixPattern.exec(text)) !== null) matchPositions.push(m.index);
   if (matchPositions.length === 0) return [];
 
-  // Build windows around each match position, keeping only those where
-  // ALL terms appear somewhere within the window (AND semantics).
-  // Fall back to any-term windows if no all-term window exists.
   const tryBuild = (requireAll: boolean): { from: number; to: number }[] => {
     const result: { from: number; to: number }[] = [];
     let lastCenter = -Infinity;
     for (const pos of matchPositions) {
-      if (pos - lastCenter < windowChars) continue; // avoid near-duplicate windows
+      if (pos - lastCenter < windowChars) continue;
       const from = Math.max(0, pos - windowChars);
       const to = Math.min(text.length, pos + windowChars);
-      if (requireAll && !termRegexes.every(re => re.test(text.slice(from, to)))) continue;
+      if (requireAll && !prefixRegexes.every(re => re.test(text.slice(from, to)))) continue;
       result.push({ from, to });
       lastCenter = pos;
       if (result.length >= maxSnippets) break;
@@ -103,7 +103,7 @@ function buildSnippets(text: string, rawQuery: string, maxSnippets = 5, windowCh
 
   const windows = tryBuild(true).length > 0 ? tryBuild(true) : tryBuild(false);
 
-  const hlPattern = new RegExp(terms.join('|'), 'gi');
+  const hlPattern = new RegExp(prefixTerms.join('|'), 'gi');
   return windows.map(({ from, to }) => {
     let excerpt = text.slice(from, to);
     if (from > 0) excerpt = '…' + excerpt;
@@ -120,7 +120,9 @@ function formatCardDate(start: string, end: string): string {
   return start === end ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
 }
 
-function MemoryCard({ result, heat, query }: { result: SearchResult; heat?: HeatLabel; query: string }) {
+type SourceMatch = { source_label: string; snippet: string };
+
+function MemoryCard({ result, sources, heat, query }: { result: SearchResult; sources: SourceMatch[]; heat?: HeatLabel; query: string }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SmoDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -188,39 +190,30 @@ function MemoryCard({ result, heat, query }: { result: SearchResult; heat?: Heat
         </div>
         <h3 className="font-medium text-gray-900 text-sm mt-1">{result.headline}</h3>
         {!expanded && (() => {
-          const snippets = buildSnippets(result.snippet ?? '', query);
-          if (result.source_label) {
+          const snippetClass = 'text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5';
+          if (sources.length > 0) {
             return (
-              <div className="mt-1.5">
-                <p className="text-xs text-indigo-500 font-medium">↳ {result.source_label}</p>
-                {snippets.length > 0
-                  ? (
-                    <div className="mt-1 space-y-1">
-                      {snippets.map((s, i) => (
-                        <p
-                          key={i}
-                          className="text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5"
-                          dangerouslySetInnerHTML={{ __html: s }}
-                        />
-                      ))}
+              <div className="mt-1.5 space-y-2">
+                {sources.map((src, i) => {
+                  const snippets = buildSnippets(src.snippet ?? '', query);
+                  return (
+                    <div key={i}>
+                      <p className="text-xs text-indigo-500 font-medium">↳ {src.source_label}</p>
+                      {snippets.length > 0
+                        ? <div className="mt-1 space-y-1">{snippets.map((s, j) => <p key={j} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}</div>
+                        : src.snippet && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{src.snippet.slice(0, 200)}</p>
+                      }
                     </div>
-                  )
-                  : result.snippet && (
-                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">{result.snippet.slice(0, 200)}</p>
-                  )}
+                  );
+                })}
               </div>
             );
           }
+          const snippets = buildSnippets(result.snippet ?? '', query);
           if (snippets.length === 0) return null;
           return (
             <div className="mt-1.5 space-y-1">
-              {snippets.map((s, i) => (
-                <p
-                  key={i}
-                  className="text-xs text-gray-600 [&_mark]:bg-yellow-100 [&_mark]:text-gray-900 [&_mark]:rounded [&_mark]:px-0.5"
-                  dangerouslySetInnerHTML={{ __html: s }}
-                />
-              ))}
+              {snippets.map((s, i) => <p key={i} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}
             </div>
           );
         })()}
@@ -400,7 +393,10 @@ export default function Search() {
         {/* Count */}
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs text-gray-400">
-            {loading ? 'Loading…' : `${results.length} memor${results.length === 1 ? 'y' : 'ies'}`}
+            {loading ? 'Loading…' : (() => {
+              const unique = new Set(results.map(r => r.smo_id)).size;
+              return `${unique} memor${unique === 1 ? 'y' : 'ies'}`;
+            })()}
             {query && !loading && ` matching "${query}"`}
           </p>
           {(fromDate || toDate) && (
@@ -420,8 +416,13 @@ export default function Search() {
         <div className="space-y-2">
           {(() => {
             const heatMap = computeHeatLabels(results);
-            return results.map(r => (
-              <MemoryCard key={r.smo_id} result={r} heat={heatMap.get(r.smo_id)} query={resultsQuery} />
+            const grouped = new Map<string, { result: SearchResult; sources: SourceMatch[] }>();
+            for (const r of results) {
+              if (!grouped.has(r.smo_id)) grouped.set(r.smo_id, { result: r, sources: [] });
+              if (r.source_label) grouped.get(r.smo_id)!.sources.push({ source_label: r.source_label, snippet: r.snippet });
+            }
+            return Array.from(grouped.values()).map(({ result: r, sources }) => (
+              <MemoryCard key={r.smo_id} result={r} sources={sources} heat={heatMap.get(r.smo_id)} query={resultsQuery} />
             ));
           })()}
         </div>
