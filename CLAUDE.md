@@ -22,8 +22,8 @@ Read **`ARCHITECTURE.md`** for full system documentation:
 - **Cloudflare Worker** (separate from Pages) handles all backend API + cron triggers
 - **Cloudflare D1** (SQLite) for storage, FTS5 for search
 - **Google OAuth 2.0** — Sign in with Google doubles as app login AND data access grant (Gmail + Drive scopes in one consent screen)
-- **OpenRouter** for LLM calls; model set via `OPENROUTER_MODEL` env var, default `moonshotai/kimi-k2` — **easily swappable, no code changes needed**
-- **LLM prompts must enforce strict JSON output** — response format is critical; if Kimi K2 underperforms, switch model via env var
+- **OpenRouter** for LLM calls; model set via `OPENROUTER_MODEL` env var, default `anthropic/claude-sonnet-4-6` — **easily swappable, no code changes needed**
+- **LLM prompts must enforce strict JSON output** — response format is critical; switch model via env var if needed
 - **Ingestion at 02:45 UTC** (10:45 PM EDT), **SMO generation at 03:30 UTC** (11:30 PM EDT)
 - **Layer 1** = daily SMO, **Layer 2** = weekly (every Friday), **Layer 3** = monthly (last Friday of month) — layer check happens in code, not separate cron jobs
 - **Empty days still get a Layer 1 SMO** — no gaps in the daily record
