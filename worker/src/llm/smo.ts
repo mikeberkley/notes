@@ -78,7 +78,7 @@ export async function summarizeRawSources(env: Env, userId: string, date: string
 
     try {
       console.log(`[summarize] Processing ${label} (${source.id})`);
-      const userPrompt = buildSourceSummaryPrompt(source.source_type, source.metadata, source.content);
+      const userPrompt = buildSourceSummaryPrompt(source.source_type as 'gmail' | 'gdrive' | 'workflowy' | 'slack', source.metadata, source.content);
       const raw = await callLLM(env, SYSTEM_PROMPT, userPrompt);
       const parsed = parseSourceSummaryResponse(raw);
 
@@ -153,6 +153,7 @@ export async function generateLayer1Smo(env: Env, userId: string, date: string):
       themes: [],
       keywords: [],
       key_entities: [],
+      key_decisions: [],
       open_questions: null,
       location: null,
     };

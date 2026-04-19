@@ -328,7 +328,7 @@ export async function searchSmos(
   fromDate?: string,
   toDate?: string,
   limit = 200,
-): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null; source_label?: string }>> {
+): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null; source_label?: string; source_url?: string | null }>> {
   // Empty query: list all SMOs sorted by date, no FTS needed
   if (!query.trim()) {
     let sql = `
@@ -347,7 +347,7 @@ export async function searchSmos(
 
     const { results } = await db.prepare(sql).bind(...params).all<{
       smo_id: string; layer: number; headline: string;
-      date_range_start: string; date_range_end: string; location: string | null; snippet: string;
+      date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null;
     }>();
     return results;
   }
@@ -355,6 +355,7 @@ export async function searchSmos(
   // Non-empty query: FTS across SMOs + raw source summaries
   const trimmed = query.trim();
   const ftsQuery = trimmed.includes(' ') ? `"${trimmed}"` : `${trimmed}*`;
+  const queryWords = trimmed.toLowerCase().replace(/['"]/g, '').split(/\s+/).filter(Boolean);
 
   // Query 1: direct SMO matches
   let smoSql = `
@@ -385,6 +386,74 @@ export async function searchSmos(
     seen.add(r.smo_id);
     return true;
   });
+
+  // For SMO-level matches, fetch linked raw sources so cards show source links
+  let expandedSmoResults: typeof dedupedSmoResults = [];
+  if (dedupedSmoResults.length > 0) {
+    const smoIds = dedupedSmoResults.map(r => r.smo_id);
+    const { results: linkedSources } = await db.prepare(`
+      SELECT sp.smo_id, rs.source_type, rs.metadata, rs.external_id
+      FROM source_pointers sp
+      INNER JOIN raw_sources rs ON rs.id = sp.target_id AND sp.target_type = 'raw_source'
+      WHERE sp.smo_id IN (${smoIds.map(() => '?').join(',')}) AND rs.user_id = ?
+    `).bind(...smoIds, userId).all<{ smo_id: string; source_type: string; metadata: string; external_id: string }>();
+
+    // Group linked sources by smo_id
+    const sourcesBySmo = new Map<string, Array<{ source_type: string; metadata: string; external_id: string }>>();
+    for (const ls of linkedSources) {
+      const arr = sourcesBySmo.get(ls.smo_id) ?? [];
+      arr.push(ls);
+      sourcesBySmo.set(ls.smo_id, arr);
+    }
+
+    for (const smo of dedupedSmoResults) {
+      const sources = sourcesBySmo.get(smo.smo_id) ?? [];
+      if (sources.length === 0) {
+        expandedSmoResults.push(smo);
+        continue;
+      }
+      // Emit one row per linked source, carrying the SMO's snippet
+      for (const src of sources) {
+        const meta = (() => { try { return JSON.parse(src.metadata); } catch { return {}; } })();
+        let source_label: string;
+        let source_url: string | null = null;
+
+        if (src.source_type === 'gmail') {
+          source_label = `Gmail: ${meta.subject ?? '(no subject)'}`;
+          source_url = `https://mail.google.com/mail/u/0/#inbox/${src.external_id}`;
+        } else if (src.source_type === 'gdrive') {
+          source_label = `Drive: ${meta.filename ?? 'Untitled'}`;
+          const fileId = src.external_id.includes('::') ? src.external_id.split('::')[0] : src.external_id;
+          source_url = `https://drive.google.com/file/d/${fileId}/view`;
+        } else if (src.source_type === 'workflowy') {
+          source_label = `Workflowy: ${meta.root_name ?? 'Note'}`;
+          // Try to deep-link to a matching node
+          const nodeIndex: [string, string][] = meta.node_index ?? [];
+          const match = nodeIndex.find(([, text]) =>
+            queryWords.some(word => text.toLowerCase().includes(word))
+          );
+          source_url = match
+            ? `https://workflowy.com/#${match[0]}`
+            : `https://workflowy.com/#${meta.root_node_id ?? ''}`;
+        } else if (src.source_type === 'gcalendar') {
+          source_label = `Calendar: ${meta.title ?? 'Event'}`;
+          source_url = 'https://calendar.google.com/calendar/r';
+        } else if (src.source_type === 'slack') {
+          if (meta.type === 'dm') {
+            source_label = `Slack DM: ${meta.with_user ?? 'Unknown'}`;
+          } else {
+            source_label = `Slack: #${meta.channel_name ?? 'channel'}`;
+            const parts = src.external_id.split('::');
+            if (parts.length >= 2) source_url = `https://app.slack.com/archives/${parts[1]}`;
+          }
+        } else {
+          source_label = src.source_type;
+        }
+
+        expandedSmoResults.push({ ...smo, source_label, source_url } as typeof smo & { source_label: string; source_url: string | null });
+      }
+    }
+  }
 
   // Query 2: source-level matches → parent SMO (exclude SMOs already found above)
   const alreadyFound = dedupedSmoResults.map(r => r.smo_id);
@@ -451,7 +520,6 @@ export async function searchSmos(
     : [];
 
   // Resolve Workflowy source URLs to the specific matching node when node_index is available
-  const queryWords = trimmed.toLowerCase().replace(/['"]/g, '').split(/\s+/).filter(Boolean);
   for (const r of sourceOnlyResults) {
     if (r.source_type === 'workflowy' && r.metadata) {
       try {
@@ -465,7 +533,7 @@ export async function searchSmos(
     }
   }
 
-  return [...dedupedSmoResults, ...sourceOnlyResults];
+  return [...expandedSmoResults, ...sourceOnlyResults];
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
