@@ -74,6 +74,23 @@ function serializeSubtree(
   return lines.join('\n');
 }
 
+// Returns [id, text] pairs for every node in the subtree (for deep-link URL resolution at search time)
+function buildNodeIndex(
+  nodeId: string,
+  childMap: Map<string | null, WorkflowyNode[]>,
+  nodeById: Map<string, WorkflowyNode>,
+  relevantIds: Set<string>,
+): Array<[string, string]> {
+  const node = nodeById.get(nodeId);
+  if (!node || !node.name.trim() || !relevantIds.has(nodeId)) return [];
+  const result: Array<[string, string]> = [[node.id, node.name.trim()]];
+  if (node.note?.trim()) result.push([node.id, node.note.trim()]);
+  for (const child of childMap.get(nodeId) ?? []) {
+    result.push(...buildNodeIndex(child.id, childMap, nodeById, relevantIds));
+  }
+  return result;
+}
+
 export async function ingestWorkflowy(
   db: D1Database,
   userId: string,
@@ -117,6 +134,7 @@ export async function ingestWorkflowy(
         root_node_id: rootId,
         root_name: root.name,
         recent_node_count: recentNodes.filter(n => findRoot(n.id, nodeById).id === rootId).length,
+        node_index: buildNodeIndex(rootId, childMap, nodeById, relevantIds),
       };
 
       // externalId includes date so each day's snapshot is a distinct record

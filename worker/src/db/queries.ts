@@ -389,6 +389,7 @@ export async function searchSmos(
   const alreadyFound = dedupedSmoResults.map(r => r.smo_id);
   let srcSql = `
     SELECT DISTINCT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
+           rs.source_type, rs.metadata,
            -- Full indexed text so buildSnippets can find the match even if it's only in entities/keywords
            (COALESCE(rs.summary, '') || ' ' || COALESCE(rs.key_entities, '') || ' ' || COALESCE(rs.keywords, '') || ' ' || COALESCE(rs.content, '')) as snippet,
            NULL as rank,
@@ -444,8 +445,24 @@ export async function searchSmos(
         smo_id: string; layer: number; headline: string;
         date_range_start: string; date_range_end: string; location: string | null;
         snippet: string; rank: number | null; source_label: string; source_url: string | null;
+        source_type: string; metadata: string;
       }>()).results
     : [];
+
+  // Resolve Workflowy source URLs to the specific matching node when node_index is available
+  const queryWords = trimmed.toLowerCase().replace(/['"]/g, '').split(/\s+/).filter(Boolean);
+  for (const r of sourceOnlyResults) {
+    if (r.source_type === 'workflowy' && r.metadata) {
+      try {
+        const meta = JSON.parse(r.metadata) as { node_index?: [string, string][] };
+        const nodeIndex = meta.node_index ?? [];
+        const match = nodeIndex.find(([, text]) =>
+          queryWords.some(word => text.toLowerCase().includes(word))
+        );
+        if (match) r.source_url = `https://workflowy.com/#${match[0]}`;
+      } catch { /* leave root URL */ }
+    }
+  }
 
   return [...dedupedSmoResults, ...sourceOnlyResults];
 }
