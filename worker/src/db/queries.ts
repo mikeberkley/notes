@@ -428,7 +428,14 @@ export async function searchSmos(
       }>()).results
     : [];
 
-  return [...dedupedSmoResults, ...sourceOnlyResults];
+  const seenSrc = new Set<string>(alreadyFound);
+  const dedupedSourceResults = sourceOnlyResults.filter(r => {
+    if (seenSrc.has(r.smo_id)) return false;
+    seenSrc.add(r.smo_id);
+    return true;
+  });
+
+  return [...dedupedSmoResults, ...dedupedSourceResults];
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
