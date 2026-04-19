@@ -5,6 +5,7 @@ interface DriveFile {
   name: string;
   mimeType: string;
   modifiedTime: string;
+  folderPath: string; // slash-separated path of ancestor folders relative to the configured root
 }
 
 async function exportGoogleDoc(fileId: string, accessToken: string): Promise<string> {
@@ -64,6 +65,7 @@ async function listFilesRecursive(
   folderId: string,
   modifiedAfter: string,
   accessToken: string,
+  folderPath = '', // path from configured root to this folder, e.g. "Research" or "Work/Research"
 ): Promise<DriveFile[]> {
   const results: DriveFile[] = [];
 
@@ -77,17 +79,18 @@ async function listFilesRecursive(
     return results;
   }
 
-  const data = await resp.json<{ files: DriveFile[] }>();
+  const data = await resp.json<{ files: Array<{ id: string; name: string; mimeType: string; modifiedTime: string }> }>();
   const items = data.files ?? [];
 
   for (const item of items) {
     if (item.mimeType === 'application/vnd.google-apps.folder') {
       // Recurse into sub-folder (no modifiedTime filter here — a sub-folder's
       // modifiedTime may not update when a child file is edited)
-      const children = await listFilesRecursive(item.id, modifiedAfter, accessToken);
+      const subPath = folderPath ? `${folderPath}/${item.name}` : item.name;
+      const children = await listFilesRecursive(item.id, modifiedAfter, accessToken, subPath);
       results.push(...children);
     } else if (item.modifiedTime >= modifiedAfter) {
-      results.push(item);
+      results.push({ ...item, folderPath });
     }
   }
 
@@ -111,7 +114,7 @@ export async function ingestGDrive(
       const content = await extractText(file, accessToken);
       if (!content.trim()) continue;
 
-      const metadata = { filename: file.name, mime_type: file.mimeType, modified_time: file.modifiedTime };
+      const metadata = { filename: file.name, mime_type: file.mimeType, modified_time: file.modifiedTime, folder_path: file.folderPath };
       const externalId = `${file.id}::${file.modifiedTime}`;
       await insertRawSource(db, userId, 'gdrive', externalId, content, metadata, date);
     } catch (err) {

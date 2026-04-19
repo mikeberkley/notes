@@ -37,8 +37,22 @@ export function buildSourceSummaryPrompt(
     label = `SLACK CHANNEL — My posts in ${meta.channel_name ?? 'unknown'} (${meta.message_count ?? 0} messages)`;
     contentLabel = 'Slack channel messages';
   } else {
-    label = `DRIVE FILE — ${meta.filename ?? 'unknown'}`;
-    contentLabel = 'document';
+    const folderPath: string = meta.folder_path ?? '';
+    const isResearch = folderPath.split('/').some(segment => segment.toLowerCase() === 'research');
+
+    if (isResearch) {
+      label = `RESEARCH DOCUMENT — ${meta.filename ?? 'unknown'}`;
+      contentLabel = 'research document containing external knowledge, insights, and learnings';
+      extraInstructions = `
+- This is a research document — it contains information, knowledge, insights, and learnings from external sources.
+- It does NOT contain personal decisions or action items. Set key_decisions to [] and open_questions to null.
+- Focus the summary on the key insights, findings, and knowledge this document provides.
+- keywords should capture the main topics, concepts, and named frameworks or methodologies discussed.
+- key_entities should cover people, organizations, and named studies or publications referenced.`;
+    } else {
+      label = `DRIVE FILE — ${meta.filename ?? 'unknown'}`;
+      contentLabel = 'document';
+    }
   }
 
   // Truncate extremely long content to avoid context overflow (~80k chars ≈ ~20k tokens)
