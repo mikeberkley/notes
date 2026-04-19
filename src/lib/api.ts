@@ -31,6 +31,7 @@ export interface SearchResult {
   snippet: string;
   rank: number | null;
   source_label?: string; // present for source-level matches
+  source_url?: string | null;
 }
 
 export interface Theme {

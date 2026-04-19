@@ -402,7 +402,25 @@ export async function searchSmos(
                ELSE 'Slack: #'  || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')
              END
              ELSE rs.source_type
-           END as source_label
+           END as source_label,
+           -- Direct URL to the source
+           CASE rs.source_type
+             WHEN 'gmail'     THEN 'https://mail.google.com/mail/u/0/#inbox/' || rs.external_id
+             WHEN 'gdrive'    THEN 'https://drive.google.com/file/d/' ||
+                                   CASE WHEN INSTR(rs.external_id, '::') > 0
+                                     THEN SUBSTR(rs.external_id, 1, INSTR(rs.external_id, '::') - 1)
+                                     ELSE rs.external_id
+                                   END || '/view'
+             WHEN 'workflowy' THEN 'https://workflowy.com/#' || COALESCE(json_extract(rs.metadata, '$.root_node_id'), '')
+             WHEN 'gcalendar' THEN 'https://calendar.google.com/calendar/r'
+             WHEN 'slack'     THEN CASE json_extract(rs.metadata, '$.type')
+               WHEN 'channel' THEN 'https://app.slack.com/archives/' ||
+                                    SUBSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2), 1,
+                                      INSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2) || '::', '::') - 1)
+               ELSE NULL
+             END
+             ELSE NULL
+           END as source_url
     FROM raw_sources_fts rsfts
     INNER JOIN source_pointers sp ON sp.target_id = rsfts.raw_source_id AND sp.target_type = 'raw_source'
     INNER JOIN smos s ON s.id = sp.smo_id
@@ -424,7 +442,7 @@ export async function searchSmos(
     ? (await db.prepare(srcSql).bind(...srcParams).all<{
         smo_id: string; layer: number; headline: string;
         date_range_start: string; date_range_end: string; location: string | null;
-        snippet: string; rank: number | null; source_label: string;
+        snippet: string; rank: number | null; source_label: string; source_url: string | null;
       }>()).results
     : [];
 
