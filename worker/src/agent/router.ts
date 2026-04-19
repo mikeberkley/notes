@@ -98,6 +98,7 @@ export async function handleAgentRequest(request: Request, env: Env, path: strin
       ...smo,
       keywords: JSON.parse(smo.keywords),
       key_entities: JSON.parse(smo.key_entities),
+      key_decisions: smo.key_decisions ? JSON.parse(smo.key_decisions) : [],
       themes: themes.map(t => ({ headline: t.headline, summary: t.summary })),
     };
 

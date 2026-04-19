@@ -47,6 +47,7 @@ export interface SmoDetail {
   summary: string;
   keywords: string[];
   key_entities: string[];
+  key_decisions: string[] | null;
   open_questions: string | null;
   location: string | null;
   date_range_start: string;

@@ -190,6 +190,7 @@ export async function insertSmo(
     summary: string;
     keywords: string[];
     key_entities: string[];
+    key_decisions: string[];
     open_questions: string | null;
     themes: Array<{ headline: string; summary: string }>;
     location?: string | null;
@@ -201,13 +202,14 @@ export async function insertSmo(
   const smoId = randomUUID();
 
   await db.prepare(`
-    INSERT INTO smos (id, user_id, layer, headline, summary, keywords, key_entities, open_questions, location, date_range_start, date_range_end)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO smos (id, user_id, layer, headline, summary, keywords, key_entities, key_decisions, open_questions, location, date_range_start, date_range_end)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     smoId, userId, layer,
     data.headline, data.summary,
     JSON.stringify(data.keywords),
     JSON.stringify(data.key_entities),
+    JSON.stringify(data.key_decisions),
     data.open_questions ?? null,
     data.location ?? null,
     dateStart, dateEnd,

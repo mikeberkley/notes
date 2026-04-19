@@ -127,6 +127,7 @@ Generate a structured memory object conforming EXACTLY to this JSON schema:
   ],
   "keywords": ["string"],
   "key_entities": ["string"],
+  "key_decisions": ["string"],
   "open_questions": ["string"] | null,
   "location": "string | null"
 }
@@ -135,6 +136,7 @@ Rules:
 - themes array must have between 1 and 5 items
 - Each theme summary must be exactly 2 sentences
 - keywords and key_entities must be arrays of strings (5–15 keywords)
+- key_decisions must be concrete decisions made or agreed upon; empty array if none
 - open_questions is an array of short strings (one per unresolved item or action item; does not need to be phrased as a question), or null if none
 - location must be "City, Country" (e.g. "New York, USA") inferred from calendar event locations, or null if not determinable
 - Do not include date_range fields
@@ -145,7 +147,7 @@ export function buildRollupPrompt(
   layer: 2 | 3,
   dateStart: string,
   dateEnd: string,
-  childSmos: Array<{ headline: string; summary: string; themes: Array<{ headline: string; summary: string }>; keywords: string[]; key_entities: string[] }>,
+  childSmos: Array<{ headline: string; summary: string; themes: Array<{ headline: string; summary: string }>; keywords: string[]; key_entities: string[]; key_decisions: string[] }>,
 ): string {
   const layerLabel = layer === 2 ? 'Weekly' : 'Monthly';
 

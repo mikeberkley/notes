@@ -129,6 +129,18 @@ export default function SMODetail() {
           )}
         </div>
 
+        {/* Key decisions */}
+        {smo.key_decisions && smo.key_decisions.length > 0 && (
+          <section className="bg-green-50 border border-green-200 rounded-xl p-4">
+            <h2 className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">Key Decisions</h2>
+            <ul className="list-disc list-inside space-y-1">
+              {smo.key_decisions.map((d, i) => (
+                <li key={i} className="text-sm text-green-900">{d}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {/* Open questions */}
         {smo.open_questions && (
           <section className="bg-amber-50 border border-amber-200 rounded-xl p-4">

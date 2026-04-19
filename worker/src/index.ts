@@ -92,6 +92,7 @@ export default {
         ...smo,
         keywords: JSON.parse(smo.keywords),
         key_entities: JSON.parse(smo.key_entities),
+        key_decisions: smo.key_decisions ? JSON.parse(smo.key_decisions) : [],
         themes,
       });
     }

@@ -22,6 +22,7 @@ interface LLMSmoResponse {
   themes: Array<{ headline: string; summary: string }>;
   keywords: string[];
   key_entities: string[];
+  key_decisions: string[];
   open_questions: string | null;
   location: string | null;
 }
@@ -116,6 +117,7 @@ export function parseLLMResponse(raw: string): LLMSmoResponse {
   if (!Array.isArray(parsed.themes)) parsed.themes = [];
   if (!Array.isArray(parsed.keywords)) parsed.keywords = [];
   if (!Array.isArray(parsed.key_entities)) parsed.key_entities = [];
+  if (!Array.isArray(parsed.key_decisions)) parsed.key_decisions = [];
   // Normalize open_questions: array → newline-joined string, string → keep, else null
   const oq = (parsed as { open_questions?: unknown }).open_questions;
   if (Array.isArray(oq)) parsed.open_questions = (oq as string[]).filter(Boolean).join('\n') || null;
@@ -195,6 +197,7 @@ export async function generateLayer2Smo(env: Env, userId: string, endDate: strin
         themes: themes.map(t => ({ headline: t.headline, summary: t.summary })),
         keywords: JSON.parse(smo.keywords) as string[],
         key_entities: JSON.parse(smo.key_entities) as string[],
+        key_decisions: smo.key_decisions ? JSON.parse(smo.key_decisions) as string[] : [],
       };
     }),
   );
@@ -226,6 +229,7 @@ export async function generateLayer3Smo(env: Env, userId: string, endDate: strin
         themes: themes.map(t => ({ headline: t.headline, summary: t.summary })),
         keywords: JSON.parse(smo.keywords) as string[],
         key_entities: JSON.parse(smo.key_entities) as string[],
+        key_decisions: smo.key_decisions ? JSON.parse(smo.key_decisions) as string[] : [],
       };
     }),
   );
