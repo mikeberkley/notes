@@ -351,7 +351,8 @@ export async function searchSmos(
   }
 
   // Non-empty query: FTS across SMOs + raw source summaries
-  const ftsQuery = query.trim().split(/\s+/).map(t => `${t}*`).join(' AND ');
+  const trimmed = query.trim();
+  const ftsQuery = trimmed.includes(' ') ? `"${trimmed}"` : `${trimmed}*`;
 
   // Query 1: direct SMO matches
   let smoSql = `
