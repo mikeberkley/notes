@@ -26,7 +26,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: 74088836dff42e8f84630c2a7a51a4aa
         run: |
           DATE=$(date -u +%Y-%m-%d)
-          wrangler d1 export notes-db --remote --output "notes-db-${DATE}.sqlite"
-          wrangler r2 object put "notes-db-backups/notes-db-${DATE}.sqlite" \
-            --file "notes-db-${DATE}.sqlite"
-          echo "Backup uploaded: notes-db-${DATE}.sqlite"
+          OUTFILE="notes-db-${DATE}.sql"
+          TABLES="users oauth_tokens api_keys config raw_sources smos themes source_pointers"
+          for TABLE in $TABLES; do
+            wrangler d1 export notes-db --remote --table "$TABLE" --output "${TABLE}.sql"
+            cat "${TABLE}.sql" >> "$OUTFILE"
+            echo "" >> "$OUTFILE"
+          done
+          wrangler r2 object put "notes-db-backups/${OUTFILE}" --file "$OUTFILE"
+          echo "Backup uploaded: ${OUTFILE}"
