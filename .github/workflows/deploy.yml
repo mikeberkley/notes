@@ -31,3 +31,11 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 74088836dff42e8f84630c2a7a51a4aa
           command: pages deploy dist --project-name=notes --branch=main
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 74088836dff42e8f84630c2a7a51a4aa
+          workingDirectory: worker
+          command: deploy
