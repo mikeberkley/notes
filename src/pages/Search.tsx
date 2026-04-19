@@ -405,18 +405,34 @@ function MarkdownText({ content }: { content: string }) {
 
 function AssistantBubble({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
-  function copy() {
-    navigator.clipboard.writeText(content).then(() => {
+  async function copy() {
+    const el = contentRef.current;
+    if (!el) return;
+    try {
+      const html = el.innerHTML;
+      const plain = el.innerText;
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([plain], { type: 'text/plain' }),
+        }),
+      ]);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    } catch {
+      // fallback for browsers that don't support ClipboardItem
+      await navigator.clipboard.writeText(el.innerText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   }
 
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] group relative">
-        <div className="rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
+        <div ref={contentRef} className="rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
           <MarkdownText content={content} />
         </div>
         <button
