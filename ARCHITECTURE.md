@@ -70,8 +70,9 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 ├── src/                            ← React frontend (TypeScript)
 │   ├── pages/
 │   │   ├── Login.tsx               ← "Sign in with Google" page
-│   │   ├── Search.tsx              ← index page post-auth, FTS search UI
+│   │   ├── Search.tsx              ← index page post-auth, FTS search UI + SMO cards
 │   │   ├── SMODetail.tsx           ← drill-down view with theme/source expansion
+│   │   ├── SourceDetail.tsx        ← per-source detail page (/source/:id, opens in new tab)
 │   │   └── Settings.tsx            ← OAuth status, Drive folder, API key mgmt
 │   ├── lib/
 │   │   └── api.ts                  ← typed fetch client for Worker API
@@ -251,13 +252,13 @@ CREATE VIRTUAL TABLE smo_fts USING fts5(
   open_questions
 );
 
--- Full-text search (FTS5) — source level (migration 0007)
+-- Full-text search (FTS5) — source level (migration 0007, extended in 0010)
 -- Indexes LLM-generated summary fields; populated by saveSourceSummary()
 -- and directly for gcalendar sources (no LLM summarization).
 CREATE VIRTUAL TABLE raw_sources_fts USING fts5(
   raw_source_id  UNINDEXED,
   user_id        UNINDEXED,
-  text           -- summary + keywords + key_entities (concatenated)
+  text           -- summary + keywords + key_entities + key_decisions + open_questions (concatenated)
 );
 ```
 
@@ -274,6 +275,7 @@ CREATE VIRTUAL TABLE raw_sources_fts USING fts5(
 | `0007_raw_sources_fts.sql` | Create `raw_sources_fts` virtual table; populate from summarized sources |
 | `0008_raw_sources_fts_include_content.sql` | Re-index `raw_sources_fts` (LLM summary fields only; content excluded for precision) |
 | `0009_smos_key_decisions.sql` | Add `key_decisions TEXT` column to `smos` |
+| `0010_fts_add_decisions_questions.sql` | Re-index `raw_sources_fts` to include `key_decisions` and `open_questions` fields from `raw_sources` |
 
 ---
 
@@ -298,9 +300,14 @@ SMOs
   GET  /api/smos/:id                         → full SMO with themes
   GET  /api/smos/:id/children                → child SMOs (for drill-down)
   GET  /api/smos/:id/sources                 → source_pointers for this SMO
+  GET  /api/smos/:id/source-summaries        → filtered source list for SMO card display
+       → [{ id, source_type, label, source_url, has_key_decisions }]
+       Excludes gcalendar; excludes gmail sources with no key decisions.
 
 Raw Sources
-  GET  /api/raw-sources/:id                  → full raw source content
+  GET  /api/raw-sources/:id                  → full raw source with all fields parsed
+       Returns all DB columns including summary, key_decisions[], key_entities[],
+       keywords[], open_questions, summarized_at, summary_error, metadata (parsed JSON)
 
 Settings
   GET  /api/settings                         → { gdrive_folder_id, workflowy_api_key: '••••••••' | null, connections: { google } }
@@ -636,15 +643,30 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 - Layer filter chips (All / Layer 1 Day / Layer 2 Week / Layer 3 Month)
 - Date range pickers (calendar icon on left side of each field)
 - Results ranked by composite FTS score (see §11 Search above)
-- SMO cards show: headline, date, location, layer badge, match snippets with keyword highlights
-- Expanded card: summary, themes, key entities, key decisions (green), open questions (amber bullets)
-- Source links (clickable, open in new tab): shown when source-level FTS matches found;
-  Workflowy links deep-link to the specific matching bullet node
+- **Collapsed card:** headline, date, location, layer badge, match snippets with keyword highlights.
+  Source-level FTS matches show clickable source labels (with "details" link to Source Details page)
+  and keyword-highlighted snippets. SMO-only matches show a snippet but no source links.
+- **Expanded card** (fetches SMO detail + source summaries in parallel on first open):
+  1. Key decisions — LLM-aggregated list from all sources (green, bullet list)
+  2. Open questions — LLM-aggregated list (amber, bullet list)
+  3. Sources — Drive, Workflowy, Slack sources; Gmail only if it has key decisions; each with
+     external link + "details" link to Source Details page; calendar excluded
+  4. Themes — with 2-sentence summaries
+  5. Keywords + key entities — tag pills
+  Footer: "View sources & drill-down →" link to SMO Detail page
 
 ### SMO Detail (`/smo/:id`)
 - Full SMO: headline, summary, themes, keywords, key entities, key decisions (green), open questions (amber bullets)
 - Child SMOs (Layer 3 → L2, Layer 2 → L1) as clickable cards
 - Raw sources: collapsed by default, click to expand full content
+
+### Source Details (`/source/:id`) — opens in new tab
+- Fetches all DB fields for a raw source via `GET /api/raw-sources/:id`
+- **AI Summary section (top):** key decisions (green), open questions (amber), summary text,
+  key entities, keywords — only shown if source has been summarized
+- **Metadata section:** source type, source date, ingested at, summarized at, ID, all metadata fields
+- **Raw content section:** full source text in scrollable monospace block
+- Page title: "Source Details"
 
 ### Settings (`/settings`)
 - Google connection status + reconnect link
