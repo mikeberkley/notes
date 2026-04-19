@@ -357,7 +357,7 @@ export async function searchSmos(
   // Query 1: direct SMO matches
   let smoSql = `
     SELECT f.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
-           (s.summary || ' ' || COALESCE(f.themes_text, '') || ' ' || COALESCE(s.open_questions, '')) as snippet,
+           (s.summary || ' ' || COALESCE(f.keywords, '') || ' ' || COALESCE(f.key_entities, '') || ' ' || COALESCE(f.themes_text, '') || ' ' || COALESCE(s.open_questions, '')) as snippet,
            f.rank
     FROM smo_fts f
     INNER JOIN smos s ON s.id = f.smo_id
@@ -376,8 +376,16 @@ export async function searchSmos(
     snippet: string; rank: number;
   }>();
 
+  // Deduplicate SMO results (FTS table may have multiple rows per smo_id from migrations)
+  const seen = new Set<string>();
+  const dedupedSmoResults = smoResults.filter(r => {
+    if (seen.has(r.smo_id)) return false;
+    seen.add(r.smo_id);
+    return true;
+  });
+
   // Query 2: source-level matches → parent SMO (exclude SMOs already found above)
-  const alreadyFound = smoResults.map(r => r.smo_id);
+  const alreadyFound = dedupedSmoResults.map(r => r.smo_id);
   let srcSql = `
     SELECT DISTINCT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
            -- Full indexed text so buildSnippets can find the match even if it's only in entities/keywords
@@ -410,9 +418,9 @@ export async function searchSmos(
     srcParams.push(...alreadyFound);
   }
   srcSql += ' LIMIT ?';
-  srcParams.push(limit - smoResults.length);
+  srcParams.push(limit - dedupedSmoResults.length);
 
-  const sourceOnlyResults = smoResults.length < limit
+  const sourceOnlyResults = dedupedSmoResults.length < limit
     ? (await db.prepare(srcSql).bind(...srcParams).all<{
         smo_id: string; layer: number; headline: string;
         date_range_start: string; date_range_end: string; location: string | null;
@@ -420,7 +428,7 @@ export async function searchSmos(
       }>()).results
     : [];
 
-  return [...smoResults, ...sourceOnlyResults];
+  return [...dedupedSmoResults, ...sourceOnlyResults];
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
