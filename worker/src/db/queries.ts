@@ -407,12 +407,11 @@ export async function searchSmos(
     }
 
     for (const smo of dedupedSmoResults) {
+      // Always emit the base SMO row first (carries the snippet, no source_label)
+      expandedSmoResults.push(smo);
+
       const sources = sourcesBySmo.get(smo.smo_id) ?? [];
-      if (sources.length === 0) {
-        expandedSmoResults.push(smo);
-        continue;
-      }
-      // Emit one row per linked source, carrying the SMO's snippet
+      // Emit one link row per source with empty snippet (sources didn't necessarily match)
       for (const src of sources) {
         const meta = (() => { try { return JSON.parse(src.metadata); } catch { return {}; } })();
         let source_label: string;
@@ -427,7 +426,6 @@ export async function searchSmos(
           source_url = `https://drive.google.com/file/d/${fileId}/view`;
         } else if (src.source_type === 'workflowy') {
           source_label = `Workflowy: ${meta.root_name ?? 'Note'}`;
-          // Try to deep-link to a matching node
           const nodeIndex: [string, string][] = meta.node_index ?? [];
           const match = nodeIndex.find(([, text]) =>
             queryWords.some(word => text.toLowerCase().includes(word))
@@ -450,7 +448,8 @@ export async function searchSmos(
           source_label = src.source_type;
         }
 
-        expandedSmoResults.push({ ...smo, source_label, source_url } as typeof smo & { source_label: string; source_url: string | null });
+        // Empty snippet: these sources aren't confirmed matches, just linked documents
+        expandedSmoResults.push({ ...smo, snippet: '', source_label, source_url } as typeof smo & { source_label: string; source_url: string | null });
       }
     }
   }
