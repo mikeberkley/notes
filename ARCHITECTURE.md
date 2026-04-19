@@ -1,13 +1,14 @@
 # Notes App — Architecture & Implementation Reference
 
 **Last updated:** 2026-04-19  
-**Status:** Built and deployed ✅
+**Status:** Built and deployed ✅  
+**Latest addition:** Intelligence layer (multi-turn Q&A over filtered memories)
 
 ---
 
 ## 1. Product Overview
 
-A personal notes intelligence app that ingests daily content from Gmail, Google Drive, and Workflowy, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens.
+A personal notes intelligence app that ingests daily content from Gmail, Google Drive, and Workflowy, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens. The search page includes a multi-turn intelligence layer that answers questions grounded in the currently-filtered set of memories.
 
 **URL:** notes.lost2038.com  
 **Current users:** Single (owner), schema designed for future multi-user expansion.
@@ -27,7 +28,7 @@ A personal notes intelligence app that ingests daily content from Gmail, Google 
 | Pages project name | `notes` |
 | Google OAuth Client ID | `833938843826-7gtm93vcocguqumj89q13oc53firfpsa.apps.googleusercontent.com` |
 | Google Cloud OAuth redirect URI | `https://notes-api.lost2038.com/api/auth/callback` |
-| OpenRouter default model | `moonshotai/kimi-k2` |
+| OpenRouter default model | `anthropic/claude-sonnet-4-6` |
 
 ---
 
@@ -102,6 +103,9 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 │   │   │   ├── router.ts           ← /agent/* route handler
 │   │   │   ├── context.ts          ← context assembly + ~4-char-per-token budget logic
 │   │   │   └── apikeys.ts          ← Bearer token auth middleware
+│   │   ├── intelligence/
+│   │   │   ├── context.ts          ← assembles SMO + source context for intelligence queries
+│   │   │   └── query.ts            ← POST /api/intelligence/query SSE streaming handler
 │   │   ├── cron/
 │   │   │   └── scheduler.ts        ← scheduled() handler, dispatches by UTC hour:minute
 │   │   └── utils/
@@ -310,8 +314,22 @@ Raw Sources
        keywords[], open_questions, summarized_at, summary_error, metadata (parsed JSON)
 
 Settings
-  GET  /api/settings                         → { gdrive_folder_id, workflowy_api_key: '••••••••' | null, connections: { google } }
-  PUT  /api/settings                         → update config values (gdrive_folder_id, workflowy_api_key)
+  GET  /api/settings                         → { gdrive_folder_id, workflowy_api_key: '••••••••' | null,
+                                                intelligence_system_prompt, intelligence_context,
+                                                connections: { google } }
+  PUT  /api/settings                         → update config values (gdrive_folder_id, workflowy_api_key,
+                                                intelligence_system_prompt, intelligence_context)
+
+Intelligence
+  POST /api/intelligence/query
+       Body: { question, history: [{role, content}], filters: {q, layer, from, to} }
+       Response: text/event-stream SSE
+         event: meta  → { smo_count, source_count, token_estimate }  (sent first)
+         event: chunk → { text }  (streamed answer fragments)
+         event: done  → {}
+         event: error → { message }
+       Assembles context from filtered SMOs + source summaries (see §21), then calls
+       OpenRouter with full conversation history for multi-turn support.
 
 Admin / Debug
   POST /api/admin/ingest/trigger             → manually trigger ingestion
@@ -571,6 +589,17 @@ Fallback: if a source's summarization failed, its raw content is truncated to 4,
 
 **Storage of `key_decisions`:** Stored as a JSON array string in the `key_decisions TEXT` column on `smos`.
 
+### Intelligence query prompt
+The intelligence layer uses a multi-message conversation structure:
+```
+[system]    User's custom system prompt (or default) + always-loaded context block
+[user]      MEMORY CONTEXT block (assembled SMOs + source summaries — see §21)
+[assistant] "I have reviewed your memory context and am ready to answer questions about it."
+[user/asst] …prior conversation history turns…
+[user]      Current question
+```
+The model returns a free-form answer (not JSON). Temperature 0.5. The context block is prepended fresh on every turn so the model always has the full filtered memory set regardless of conversation length.
+
 ### Layer 2/3 rollup prompt
 ```
 {Weekly|Monthly} rollup covering {start} to {end}
@@ -654,6 +683,10 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
   4. Themes — with 2-sentence summaries
   5. Keywords + key entities — tag pills
   Footer: "View sources & drill-down →" link to SMO Detail page
+- **Intelligence panel** (below filters, above results — see §21):
+  Multi-turn chat UI. Streams answers word-by-word. Header shows memory count, source count,
+  and token estimate for the current context. Stop button cancels mid-stream. Clear resets
+  the conversation. Filters (keyword, date range, layer) determine which memories are in scope.
 
 ### SMO Detail (`/smo/:id`)
 - Full SMO: headline, summary, themes, keywords, key entities, key decisions (green), open questions (amber bullets)
@@ -672,6 +705,8 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 - Google connection status + reconnect link
 - Google Drive folder ID input + save
 - Workflowy API key input (password field) + save — key is stored per-user in the `config` table, never as a global secret; shown as `••••••••` once saved
+- **Intelligence** — system prompt textarea + always-loaded context textarea; both stored in
+  the `config` table under `intelligence_system_prompt` and `intelligence_context`
 - API Keys: list, create (key shown once with copy button), revoke
 - "Run ingestion now" debug button
 
@@ -807,14 +842,90 @@ After deployment, complete these steps once:
 
 ---
 
+## 21. Intelligence Layer
+
+A multi-turn question-answering system embedded in the Search page. The user asks questions; the system grounds its answers in the memories currently visible on the page (same keyword/date/layer filters active).
+
+### Flow
+
+1. **Filter sync** — the intelligence panel always uses the current filter state (`q`, `layer`, `from`, `to`) from the Search page. Changing a filter implicitly changes what memories the next question will draw from.
+2. **Context assembly** (`worker/src/intelligence/context.ts`):
+   - Re-runs the same DB query as the search page to get matching SMOs
+   - Fetches themes for all matching SMOs in one batched query
+   - Fetches source summaries (LLM-generated fields only, no raw content) for all matching SMOs via `source_pointers → raw_sources`
+   - Builds a structured context block (see below) up to a **400K char / ~100K token budget**
+3. **LLM call** — streams from OpenRouter with `stream: true`; full conversation history is included on every turn for multi-turn coherence
+4. **SSE response** — Worker writes `event: meta` (context stats) first, then `event: chunk` fragments, then `event: done`
+
+### Context block format
+
+```
+MEMORY CONTEXT: N memories, M sources
+
+=== MONTHLY MEMORY: 2026-01-01 – 2026-03-31 ===
+Headline: …
+Summary: …
+Themes: Theme A | Theme B | Theme C
+Key Decisions: • decision 1 • decision 2
+Open Questions: • question 1
+Keywords: …
+
+=== WEEKLY MEMORY: 2026-04-14 – 2026-04-20 ===
+…
+
+=== DAILY MEMORY: 2026-04-19 ===
+…
+  [Gmail: Re: Budget approval] Summary text | Decisions: … | Keywords: …
+  [Drive: Q1 Review.docx] Summary text | …
+  [Workflowy: Product roadmap] Summary text | …
+```
+
+**Ordering:** Layer 3 → Layer 2 → Layer 1, newest-first within each layer. Source summaries are only included for Layer 1 SMOs (higher layers already synthesize them). Budget truncates from the bottom — least-recently-dated Layer 1 SMOs drop first.
+
+### Context token budget
+
+| Layer | Per-SMO (no sources) | Per SMO + 8 sources | Approximate capacity at 400K chars |
+|---|---|---|---|
+| L3 | ~1,700 chars | — | ~235 monthly SMOs |
+| L2 | ~1,700 chars | — | ~235 weekly SMOs |
+| L1 | ~1,700 chars | ~6,900 chars (with sources) | ~58 daily SMOs with sources |
+
+In practice, a mixed result set (some L3/L2/L1) easily fits 4–6 months of daily data within the budget. The context header shown in the UI (`X memories · Y sources · ~Z tokens in context`) reflects what actually fit.
+
+### Conversation history
+
+All prior turns are sent with every request — the model has full context for follow-up questions. History is held in React state only (not persisted); clearing the panel resets it. The context block is re-assembled from the DB on every request so filter changes take effect immediately.
+
+### User configuration (stored in `config` table)
+
+| Key | Purpose | Default |
+|---|---|---|
+| `intelligence_system_prompt` | System prompt sent to the LLM | Built-in default |
+| `intelligence_context` | Always-loaded background text prepended after the system prompt | None |
+
+### Key files
+
+| File | Role |
+|---|---|
+| `worker/src/intelligence/context.ts` | DB queries + context block assembly |
+| `worker/src/intelligence/query.ts` | SSE streaming route handler |
+| `worker/src/llm/openrouter.ts` | `streamChatCompletion()` async generator |
+| `worker/src/llm/prompts.ts` | `buildIntelligenceSystemPrompt()`, `buildIntelligenceContextBlock()` |
+| `worker/src/db/queries.ts` | `getSmosForIntelligence()`, `getThemesForSmos()`, `getSourceSummariesForSmos()` |
+| `src/pages/Search.tsx` | `IntelligencePanel` React component |
+| `src/lib/api.ts` | `api.intelligence.query()` SSE streaming client |
+
+---
+
 ## 20. Future Enhancements (not in MVP)
 
 - Daily brief email (morning summary)
 - Google Calendar ingestion
-- Slack ingestion
 - Semantic / vector search (Cloudflare Vectorize)
 - Multi-user support (user_id FK already in schema)
 - Manual note entry UI
 - Mobile-optimized view
 - Agent API write access (append notes, tag memories)
 - MCP server wrapper — expose agent API as an MCP tool so Claude Code and other MCP clients can call it natively without a separate CLI
+- Intelligence layer: persist conversation history across sessions
+- Intelligence layer: let the user pin specific SMOs into context regardless of current filters
