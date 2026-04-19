@@ -120,7 +120,7 @@ function formatCardDate(start: string, end: string): string {
   return start === end ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
 }
 
-type SourceMatch = { source_label: string; snippet: string; source_url?: string | null };
+type SourceMatch = { source_label: string; snippet: string; source_url?: string | null; source_id?: string | null };
 
 function MemoryCard({ result, sources, heat, query }: { result: SearchResult; sources: SourceMatch[]; heat?: HeatLabel; query: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -202,10 +202,17 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
                 const snippets = buildSnippets(src.snippet ?? '', query);
                 return (
                   <div key={i}>
-                    {src.source_url
-                      ? <a href={src.source_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-500 font-medium hover:underline">↳ {src.source_label}</a>
-                      : <p className="text-xs text-indigo-500 font-medium">↳ {src.source_label}</p>
-                    }
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {src.source_url
+                        ? <a href={src.source_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-500 font-medium hover:underline">↳ {src.source_label}</a>
+                        : <p className="text-xs text-indigo-500 font-medium">↳ {src.source_label}</p>
+                      }
+                      {src.source_id && (
+                        <a href={`/source/${src.source_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-gray-400 hover:text-indigo-500 border border-gray-200 hover:border-indigo-300 rounded px-1.5 py-0.5 transition-colors">
+                          details
+                        </a>
+                      )}
+                    </div>
                     {snippets.length > 0
                       ? <div className="mt-1 space-y-1">{snippets.map((s, j) => <p key={j} className={snippetClass} dangerouslySetInnerHTML={{ __html: s }} />)}</div>
                       : src.snippet && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{src.snippet.slice(0, 200)}</p>
@@ -447,7 +454,7 @@ export default function Search() {
             const grouped = new Map<string, { result: SearchResult; sources: SourceMatch[] }>();
             for (const r of results) {
               if (!grouped.has(r.smo_id)) grouped.set(r.smo_id, { result: r, sources: [] });
-              if (r.source_label) grouped.get(r.smo_id)!.sources.push({ source_label: r.source_label, snippet: r.snippet, source_url: r.source_url });
+              if (r.source_label) grouped.get(r.smo_id)!.sources.push({ source_label: r.source_label, snippet: r.snippet, source_url: r.source_url, source_id: r.source_id });
             }
             return Array.from(grouped.values()).map(({ result: r, sources }) => (
               <MemoryCard key={r.smo_id} result={r} sources={sources} heat={heatMap.get(r.smo_id)} query={resultsQuery} />

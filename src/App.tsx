@@ -3,6 +3,7 @@ import Login from './pages/Login.js';
 import Search from './pages/Search.js';
 import SMODetail from './pages/SMODetail.js';
 import Settings from './pages/Settings.js';
+import SourceDetail from './pages/SourceDetail.js';
 import { api } from './lib/api.js';
 
 function getPage(): string {
@@ -10,6 +11,7 @@ function getPage(): string {
   if (path === '/' || path === '') return 'login';
   if (path === '/search') return 'search';
   if (path.startsWith('/smo/')) return 'smo';
+  if (path.startsWith('/source/')) return 'source';
   if (path === '/settings') return 'settings';
   return 'login';
 }
@@ -43,6 +45,7 @@ export default function App() {
 
   if (page === 'search') return <Search />;
   if (page === 'smo') return <SMODetail />;
+  if (page === 'source') return <SourceDetail />;
   if (page === 'settings') return <Settings />;
   return <Login />;
 }

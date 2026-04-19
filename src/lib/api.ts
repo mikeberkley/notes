@@ -32,6 +32,7 @@ export interface SearchResult {
   rank: number | null;
   source_label?: string; // present for source-level matches
   source_url?: string | null;
+  source_id?: string | null;
 }
 
 export interface Theme {
@@ -57,7 +58,11 @@ export interface SmoDetail {
 
 export interface RawSource {
   id: string;
+  user_id: string;
   source_type: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar' | 'slack';
+  external_id: string;
+  source_date: string;
+  ingested_at: string;
   metadata: {
     subject?: string;
     sender?: string;
@@ -67,8 +72,16 @@ export interface RawSource {
     with_user?: string;
     channel_name?: string;
     type?: string;
+    [key: string]: unknown;
   };
   content: string;
+  summary: string | null;
+  key_decisions: string[] | null;
+  key_entities: string[] | null;
+  keywords: string[] | null;
+  open_questions: string | null;
+  summarized_at: string | null;
+  summary_error: string | null;
 }
 
 export interface ApiKeyRecord {

@@ -328,7 +328,7 @@ export async function searchSmos(
   fromDate?: string,
   toDate?: string,
   limit = 200,
-): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null; source_label?: string; source_url?: string | null }>> {
+): Promise<Array<{ smo_id: string; layer: number; headline: string; date_range_start: string; date_range_end: string; location: string | null; snippet: string; rank: number | null; source_label?: string; source_url?: string | null; source_id?: string | null }>> {
   // Empty query: list all SMOs sorted by date, no FTS needed
   if (!query.trim()) {
     let sql = `
@@ -361,14 +361,14 @@ export async function searchSmos(
   type SrcRow = {
     smo_id: string; layer: number; headline: string;
     date_range_start: string; date_range_end: string; location: string | null;
-    snippet: string; rank: number | null; source_label: string; source_url: string | null;
+    snippet: string; rank: number | null; source_label: string; source_url: string | null; source_id: string;
     source_type: string; metadata: string;
   };
 
   // Query 1: source-level FTS matches — one row per (smo, source) with best rank for that source
   let srcSql = `
     SELECT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
-           rs.source_type, rs.metadata,
+           rs.id as source_id, rs.source_type, rs.metadata,
            (COALESCE(rs.summary, '') || ' ' || COALESCE(rs.key_entities, '') || ' ' || COALESCE(rs.keywords, '') || ' ' || COALESCE(rs.content, '')) as snippet,
            MAX(rsfts.rank) as rank,
            CASE rs.source_type

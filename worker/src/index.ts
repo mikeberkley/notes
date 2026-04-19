@@ -120,7 +120,13 @@ export default {
     if (rawSourceMatch && request.method === 'GET') {
       const rs = await getRawSourceById(env.DB, rawSourceMatch[1], userId);
       if (!rs) return notFound();
-      return json({ ...rs, metadata: JSON.parse(rs.metadata) });
+      return json({
+        ...rs,
+        metadata: JSON.parse(rs.metadata),
+        key_decisions: rs.key_decisions ? JSON.parse(rs.key_decisions) : null,
+        key_entities: rs.key_entities ? JSON.parse(rs.key_entities) : null,
+        keywords: rs.keywords ? JSON.parse(rs.keywords) : null,
+      });
     }
 
     // GET /api/settings
