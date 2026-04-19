@@ -10,9 +10,18 @@ export function buildSourceSummaryPrompt(
 
   let label: string;
   let contentLabel: string;
+  let extraInstructions = '';
+
   if (sourceType === 'gmail') {
     label = `EMAIL — Subject: ${meta.subject ?? '(no subject)'} | From: ${meta.sender ?? 'unknown'}`;
     contentLabel = 'email';
+  } else if (sourceType === 'workflowy') {
+    label = `WORKFLOWY NOTES — Section: ${meta.root_name ?? 'unknown'}`;
+    contentLabel = 'Workflowy notes (hierarchical bullet list)';
+    extraInstructions = `
+- This is a hierarchical outline. Treat each bullet as a discrete item.
+- Capture VERBATIM names of initiatives, projects, strategies, and action items as keywords (e.g. "Accelerate internal development", "ICP refinement").
+- Do not paraphrase named items — copy them exactly as they appear.`;
   } else if (sourceType === 'slack' && meta.type === 'dm') {
     label = `SLACK DM — Conversation with ${meta.with_user ?? 'unknown'} (${meta.message_count ?? 0} messages)`;
     contentLabel = 'Slack DM conversation';
@@ -40,16 +49,17 @@ Respond ONLY with a JSON object matching this exact schema:
 {
   "summary": "string — 2 to 4 sentences capturing what this document/email is about",
   "key_decisions": ["string"],    // specific decisions made or agreed upon; empty array if none
-  "key_entities": ["string"],     // people, organizations, projects, places mentioned
-  "keywords": ["string"],         // 3 to 8 specific topic keywords
+  "key_entities": ["string"],     // people, organizations, projects, named initiatives, and places mentioned
+  "keywords": ["string"],         // 5 to 15 keywords: include specific topic words AND verbatim names of initiatives, strategies, projects, and action items
   "open_questions": "string | null"  // unresolved questions or action items raised; null if none
 }
 
 Rules:
 - key_decisions must be concrete decisions, not vague observations
-- key_entities should be proper nouns only
+- key_entities should include proper nouns AND named projects, initiatives, and strategies (e.g. "ICP refinement", "monolith decoupling")
+- keywords must include VERBATIM multi-word phrases for named items — do not paraphrase or generalize them
 - keywords should be specific, not generic words like "email" or "document"
-- open_questions is a single string summarizing any unresolved items, or null`;
+- open_questions is a single string summarizing any unresolved items, or null${extraInstructions}`;
 }
 
 export function buildLayer1Prompt(date: string, sources: Array<{
