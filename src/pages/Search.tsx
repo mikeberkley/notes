@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, type SearchResult, type SmoDetail, type SourceSummaryItem } from '../lib/api.js';
+import { api, type SearchResult, type SmoDetail, type SourceSummaryItem, type ChatMessage, type ContextMeta } from '../lib/api.js';
 
 const LAYER_LABELS: Record<number, string> = { 1: 'Day', 2: 'Week', 3: 'Month' };
 const LAYER_COLORS: Record<number, string> = {
@@ -333,6 +333,184 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
   );
 }
 
+function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; from?: string; to?: string } }) {
+  const [history, setHistory] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
+  const [contextMeta, setContextMeta] = useState<ContextMeta | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [history, streamingContent]);
+
+  async function send() {
+    const question = input.trim();
+    if (!question || streaming) return;
+
+    setInput('');
+    setError(null);
+    setStreaming(true);
+    setStreamingContent('');
+
+    const userMsg: ChatMessage = { role: 'user', content: question };
+    setHistory(prev => [...prev, userMsg]);
+
+    abortRef.current = new AbortController();
+
+    let accumulated = '';
+    try {
+      await api.intelligence.query(
+        { question, history, filters: { q: filters.q, layer: filters.layer, from: filters.from || undefined, to: filters.to || undefined } },
+        {
+          onMeta: (meta) => setContextMeta(meta),
+          onChunk: (text) => { accumulated += text; setStreamingContent(accumulated); },
+          onDone: () => {
+            setHistory(prev => [...prev, { role: 'assistant', content: accumulated }]);
+            setStreamingContent('');
+            setStreaming(false);
+          },
+          onError: (err) => {
+            setError(err.message);
+            setStreaming(false);
+            setStreamingContent('');
+            // Remove the optimistically added user message on error
+            setHistory(prev => prev.slice(0, -1));
+          },
+        },
+        abortRef.current.signal,
+      );
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') setError(String(err));
+      setStreaming(false);
+      setStreamingContent('');
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
+
+  function clearConversation() {
+    abortRef.current?.abort();
+    setHistory([]);
+    setStreamingContent('');
+    setStreaming(false);
+    setContextMeta(null);
+    setError(null);
+    inputRef.current?.focus();
+  }
+
+  const hasContent = history.length > 0 || streaming;
+
+  return (
+    <div className="mb-5 bg-white rounded-xl border border-indigo-200 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-indigo-50 border-b border-indigo-100">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Ask</span>
+          {contextMeta && (
+            <span className="text-xs text-indigo-400">
+              {contextMeta.smo_count} {contextMeta.smo_count === 1 ? 'memory' : 'memories'} · {contextMeta.source_count} sources · ~{contextMeta.token_estimate.toLocaleString()} tokens in context
+            </span>
+          )}
+        </div>
+        {hasContent && (
+          <button
+            onClick={clearConversation}
+            className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Chat history */}
+      {hasContent && (
+        <div ref={scrollRef} className="max-h-96 overflow-y-auto px-4 py-3 space-y-3">
+          {history.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed ${
+                  msg.role === 'user'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-100 text-gray-800'
+                }`}
+              >
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {streaming && streamingContent && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800 whitespace-pre-wrap leading-relaxed">
+                {streamingContent}
+                <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 animate-pulse rounded-sm" />
+              </div>
+            </div>
+          )}
+          {streaming && !streamingContent && (
+            <div className="flex justify-start">
+              <div className="rounded-lg px-3 py-2 bg-gray-100">
+                <span className="flex gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="mx-4 my-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      {/* Input */}
+      <div className="px-3 py-2.5 flex gap-2 items-end">
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask a question about your memories… (Enter to send, Shift+Enter for new line)"
+          rows={1}
+          disabled={streaming}
+          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none disabled:opacity-50"
+          style={{ fontSize: '16px', minHeight: '38px', maxHeight: '120px' }}
+          onInput={e => {
+            const el = e.currentTarget;
+            el.style.height = 'auto';
+            el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+          }}
+        />
+        <button
+          onClick={streaming ? () => abortRef.current?.abort() : send}
+          disabled={!streaming && !input.trim()}
+          className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            streaming
+              ? 'bg-red-100 text-red-600 hover:bg-red-200'
+              : 'bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed'
+          }`}
+        >
+          {streaming ? 'Stop' : 'Ask'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Search() {
   const [query, setQuery] = useState('');
   const [resultsQuery, setResultsQuery] = useState('');
@@ -447,6 +625,9 @@ export default function Search() {
             ))}
           </div>
         </div>
+
+        {/* Intelligence panel */}
+        <IntelligencePanel filters={{ q: resultsQuery, layer: layerFilter, from: fromDate || undefined, to: toDate || undefined }} />
 
         {/* Count */}
         <div className="flex items-center justify-between mb-3">

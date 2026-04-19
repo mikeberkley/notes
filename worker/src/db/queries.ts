@@ -559,6 +559,131 @@ export async function setConfig(db: D1Database, userId: string, key: string, val
 
 // ─── All users with Google tokens ────────────────────────────────────────────
 
+// ─── Intelligence ─────────────────────────────────────────────────────────────
+
+// Return distinct SMOs matching the same filters as the search page.
+// With a keyword query: use FTS to find matching SMO IDs, then fetch full rows.
+// Without a keyword query: fetch by layer/date filters directly.
+export async function getSmosForIntelligence(
+  db: D1Database,
+  userId: string,
+  q: string,
+  layer?: number,
+  fromDate?: string,
+  toDate?: string,
+): Promise<Smo[]> {
+  if (!q.trim()) {
+    let sql = 'SELECT * FROM smos WHERE user_id = ?';
+    const params: (string | number)[] = [userId];
+    if (layer !== undefined) { sql += ' AND layer = ?'; params.push(layer); }
+    if (fromDate) { sql += ' AND date_range_start >= ?'; params.push(fromDate); }
+    if (toDate) { sql += ' AND date_range_start <= ?'; params.push(toDate); }
+    sql += ' ORDER BY layer DESC, date_range_start DESC LIMIT 500';
+    const { results } = await db.prepare(sql).bind(...params).all<Smo>();
+    return results;
+  }
+
+  // FTS path: collect matching SMO IDs from both source-level and SMO-level matches
+  const trimmed = q.trim();
+  const ftsQuery = trimmed.includes(' ') ? `"${trimmed}"` : `${trimmed}*`;
+  const smoIdSet = new Set<string>();
+
+  // Source-level FTS matches
+  let srcSql = `
+    SELECT DISTINCT sp.smo_id FROM raw_sources_fts rsfts
+    INNER JOIN source_pointers sp ON sp.target_id = rsfts.raw_source_id AND sp.target_type = 'raw_source'
+    INNER JOIN smos s ON s.id = sp.smo_id
+    WHERE raw_sources_fts MATCH ? AND rsfts.user_id = ?
+  `;
+  const srcParams: (string | number)[] = [ftsQuery, userId];
+  if (layer !== undefined) { srcSql += ' AND s.layer = ?'; srcParams.push(layer); }
+  if (fromDate) { srcSql += ' AND s.date_range_start >= ?'; srcParams.push(fromDate); }
+  if (toDate) { srcSql += ' AND s.date_range_start <= ?'; srcParams.push(toDate); }
+  srcSql += ' LIMIT 500';
+  const { results: srcRows } = await db.prepare(srcSql).bind(...srcParams).all<{ smo_id: string }>();
+  for (const r of srcRows) smoIdSet.add(r.smo_id);
+
+  // SMO-level FTS matches
+  let smoFtsSql = `
+    SELECT DISTINCT f.smo_id FROM smo_fts f
+    INNER JOIN smos s ON s.id = f.smo_id
+    WHERE smo_fts MATCH ? AND f.user_id = ?
+  `;
+  const smoFtsParams: (string | number)[] = [ftsQuery, userId];
+  if (layer !== undefined) { smoFtsSql += ' AND f.layer = ?'; smoFtsParams.push(layer); }
+  if (fromDate) { smoFtsSql += ' AND s.date_range_start >= ?'; smoFtsParams.push(fromDate); }
+  if (toDate) { smoFtsSql += ' AND s.date_range_start <= ?'; smoFtsParams.push(toDate); }
+  smoFtsSql += ' LIMIT 500';
+  const { results: smoFtsRows } = await db.prepare(smoFtsSql).bind(...smoFtsParams).all<{ smo_id: string }>();
+  for (const r of smoFtsRows) smoIdSet.add(r.smo_id);
+
+  if (smoIdSet.size === 0) return [];
+  const ids = [...smoIdSet];
+  return fetchSmosByIds(db, userId, ids);
+}
+
+async function fetchSmosByIds(db: D1Database, userId: string, ids: string[]): Promise<Smo[]> {
+  const CHUNK = 90;
+  const results: Smo[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const { results: rows } = await db.prepare(
+      `SELECT * FROM smos WHERE user_id = ? AND id IN (${placeholders}) ORDER BY layer DESC, date_range_start DESC`
+    ).bind(userId, ...chunk).all<Smo>();
+    results.push(...rows);
+  }
+  return results;
+}
+
+export async function getThemesForSmos(db: D1Database, smoIds: string[]): Promise<Map<string, Theme[]>> {
+  const map = new Map<string, Theme[]>();
+  if (smoIds.length === 0) return map;
+  const CHUNK = 90;
+  for (let i = 0; i < smoIds.length; i += CHUNK) {
+    const chunk = smoIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const { results } = await db.prepare(
+      `SELECT * FROM themes WHERE smo_id IN (${placeholders}) ORDER BY smo_id, sort_order`
+    ).bind(...chunk).all<Theme>();
+    for (const t of results) {
+      const arr = map.get(t.smo_id) ?? [];
+      arr.push(t);
+      map.set(t.smo_id, arr);
+    }
+  }
+  return map;
+}
+
+export async function getSourceSummariesForSmos(
+  db: D1Database,
+  userId: string,
+  smoIds: string[],
+): Promise<Map<string, Array<{ id: string; source_type: string; metadata: string; summary: string | null; key_decisions: string | null; key_entities: string | null; keywords: string | null }>>> {
+  const map = new Map<string, Array<{ id: string; source_type: string; metadata: string; summary: string | null; key_decisions: string | null; key_entities: string | null; keywords: string | null }>>();
+  if (smoIds.length === 0) return map;
+  const CHUNK = 45; // smaller chunks — two params per SMO (smo_id + join)
+  for (let i = 0; i < smoIds.length; i += CHUNK) {
+    const chunk = smoIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const { results } = await db.prepare(`
+      SELECT sp.smo_id, rs.id, rs.source_type, rs.metadata,
+             rs.summary, rs.key_decisions, rs.key_entities, rs.keywords
+      FROM source_pointers sp
+      JOIN raw_sources rs ON rs.id = sp.target_id AND sp.target_type = 'raw_source'
+      WHERE sp.smo_id IN (${placeholders}) AND rs.user_id = ?
+        AND rs.source_type != 'gcalendar' AND rs.summarized_at IS NOT NULL
+      ORDER BY rs.source_date DESC
+    `).bind(...chunk, userId).all<{ smo_id: string; id: string; source_type: string; metadata: string; summary: string | null; key_decisions: string | null; key_entities: string | null; keywords: string | null }>();
+    for (const r of results) {
+      const arr = map.get(r.smo_id) ?? [];
+      arr.push({ id: r.id, source_type: r.source_type, metadata: r.metadata, summary: r.summary, key_decisions: r.key_decisions, key_entities: r.key_entities, keywords: r.keywords });
+      map.set(r.smo_id, arr);
+    }
+  }
+  return map;
+}
+
 export async function getAllUsersWithTokens(db: D1Database): Promise<User[]> {
   const { results } = await db.prepare(`
     SELECT u.* FROM users u

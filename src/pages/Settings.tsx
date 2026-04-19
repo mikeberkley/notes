@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { api, type ApiKeyRecord } from '../lib/api.js';
 
 export default function Settings() {
-  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; slack_token: string | null; connections: { google: boolean } } | null>(null);
+  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; slack_token: string | null; intelligence_system_prompt: string | null; intelligence_context: string | null; connections: { google: boolean } } | null>(null);
   const [folderInput, setFolderInput] = useState('');
   const [workflowyKeyInput, setWorkflowyKeyInput] = useState('');
   const [slackTokenInput, setSlackTokenInput] = useState('');
+  const [intelligenceSystemPromptInput, setIntelligenceSystemPromptInput] = useState('');
+  const [intelligenceContextInput, setIntelligenceContextInput] = useState('');
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null);
@@ -17,6 +19,8 @@ export default function Settings() {
       .then(([s, k]) => {
         setSettings(s);
         setFolderInput(s.gdrive_folder_id ?? '');
+        setIntelligenceSystemPromptInput(s.intelligence_system_prompt ?? '');
+        setIntelligenceContextInput(s.intelligence_context ?? '');
         setKeys(k);
       })
       .catch(console.error)
@@ -65,6 +69,17 @@ export default function Settings() {
   async function revokeKey(id: string) {
     await api.keys.delete(id);
     setKeys(prev => prev.filter(k => k.id !== id));
+  }
+
+  async function saveIntelligenceSettings() {
+    await api.settings.update({
+      intelligence_system_prompt: intelligenceSystemPromptInput,
+      intelligence_context: intelligenceContextInput,
+    });
+    const fresh = await api.settings.get();
+    setSettings(fresh);
+    setMessage('Intelligence settings saved.');
+    setTimeout(() => setMessage(''), 2000);
   }
 
   async function triggerIngest() {
@@ -239,6 +254,47 @@ export default function Settings() {
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
             >
               Create
+            </button>
+          </div>
+        </section>
+
+        {/* Intelligence */}
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="font-semibold text-gray-900 mb-1">Intelligence</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Customize how the intelligence layer answers your questions on the search page.
+          </p>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">System prompt</label>
+              <p className="text-xs text-gray-400 mb-2">Defines the assistant's persona and answer style. Leave blank for the default.</p>
+              <textarea
+                value={intelligenceSystemPromptInput}
+                onChange={e => setIntelligenceSystemPromptInput(e.target.value)}
+                rows={4}
+                placeholder="e.g. You are a thoughtful assistant helping me recall decisions and plans from my notes. Always cite the date of the memory you're drawing from."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Always-loaded context</label>
+              <p className="text-xs text-gray-400 mb-2">Background about you that will be prepended to every intelligence session (name, role, projects, etc.).</p>
+              <textarea
+                value={intelligenceContextInput}
+                onChange={e => setIntelligenceContextInput(e.target.value)}
+                rows={5}
+                placeholder="e.g. My name is Mike. I'm the founder of Acme Corp. Our main product is..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y"
+              />
+            </div>
+
+            <button
+              onClick={saveIntelligenceSettings}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
+            >
+              Save
             </button>
           </div>
         </section>

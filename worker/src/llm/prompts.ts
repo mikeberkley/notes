@@ -143,6 +143,115 @@ Rules:
 - If there is no meaningful content, generate a valid object with headline "No notable activity" and an empty themes array`;
 }
 
+export function buildIntelligenceSystemPrompt(
+  userSystemPrompt: string | null,
+  alwaysContext: string | null,
+): string {
+  let prompt = userSystemPrompt?.trim() ||
+    'You are a personal intelligence assistant with access to the user\'s notes, emails, and documents. Answer questions thoughtfully and cite specific sources and dates when relevant.';
+  if (alwaysContext?.trim()) {
+    prompt += `\n\nADDITIONAL CONTEXT (always loaded):\n${alwaysContext.trim()}`;
+  }
+  return prompt;
+}
+
+const CHAR_BUDGET = 400_000; // ~100k tokens; well within claude-sonnet-4-6's 200k window
+
+export function buildIntelligenceContextBlock(
+  smos: Array<{
+    id: string;
+    layer: number;
+    headline: string;
+    summary: string;
+    keywords: string;
+    key_entities: string;
+    key_decisions: string | null;
+    open_questions: string | null;
+    date_range_start: string;
+    date_range_end: string;
+  }>,
+  themesMap: Map<string, Array<{ headline: string; summary: string }>>,
+  sourcesMap: Map<string, Array<{ source_type: string; metadata: string; summary: string | null; key_decisions: string | null; key_entities: string | null; keywords: string | null }>>,
+): { block: string; smoCount: number; sourceCount: number; charCount: number } {
+  const LAYER_LABEL: Record<number, string> = { 1: 'DAILY', 2: 'WEEKLY', 3: 'MONTHLY' };
+
+  let block = '';
+  let charCount = 0;
+  let smoCount = 0;
+  let sourceCount = 0;
+
+  // SMOs arrive sorted: Layer 3 first, then 2, then 1, each layer newest-first
+  for (const smo of smos) {
+    const dateLabel = smo.date_range_start === smo.date_range_end
+      ? smo.date_range_start
+      : `${smo.date_range_start} – ${smo.date_range_end}`;
+
+    const lines: string[] = [
+      `=== ${LAYER_LABEL[smo.layer] ?? `LAYER ${smo.layer}`} MEMORY: ${dateLabel} ===`,
+      `Headline: ${smo.headline}`,
+      `Summary: ${smo.summary}`,
+    ];
+
+    const themes = themesMap.get(smo.id) ?? [];
+    if (themes.length > 0) {
+      lines.push(`Themes: ${themes.map(t => t.headline).join(' | ')}`);
+    }
+
+    const decisions = smo.key_decisions ? (JSON.parse(smo.key_decisions) as string[]) : [];
+    if (decisions.length > 0) {
+      lines.push(`Key Decisions: ${decisions.map(d => `• ${d}`).join(' ')}`);
+    }
+
+    if (smo.open_questions) {
+      const qs = smo.open_questions.split('\n').filter(Boolean);
+      if (qs.length > 0) lines.push(`Open Questions: ${qs.map(q => `• ${q}`).join(' ')}`);
+    }
+
+    const keywords = JSON.parse(smo.keywords) as string[];
+    if (keywords.length > 0) lines.push(`Keywords: ${keywords.join(', ')}`);
+
+    // Include source summaries for Layer 1 only (higher layers already synthesize them)
+    if (smo.layer === 1) {
+      const sources = sourcesMap.get(smo.id) ?? [];
+      for (const src of sources) {
+        const meta = JSON.parse(src.metadata) as Record<string, unknown>;
+        let srcLabel: string;
+        if (src.source_type === 'gmail') srcLabel = `Gmail: ${String(meta.subject ?? '(no subject)')}`;
+        else if (src.source_type === 'workflowy') srcLabel = `Workflowy: ${String(meta.root_name ?? 'Note')}`;
+        else if (src.source_type === 'slack') {
+          srcLabel = meta.type === 'dm'
+            ? `Slack DM: ${String(meta.with_user ?? 'Unknown')}`
+            : `Slack: #${String(meta.channel_name ?? 'channel')}`;
+        }
+        else srcLabel = `Drive: ${String(meta.filename ?? 'Untitled')}`;
+
+        const srcParts: string[] = [`  [${srcLabel}]`];
+        if (src.summary) srcParts.push(src.summary);
+        if (src.key_decisions) {
+          const kd = JSON.parse(src.key_decisions) as string[];
+          if (kd.length) srcParts.push(`Decisions: ${kd.join('; ')}`);
+        }
+        if (src.keywords) {
+          const kw = JSON.parse(src.keywords) as string[];
+          if (kw.length) srcParts.push(`Keywords: ${kw.join(', ')}`);
+        }
+        lines.push(srcParts.join(' | '));
+        sourceCount++;
+      }
+    }
+
+    const entry = lines.join('\n') + '\n\n';
+
+    if (charCount + entry.length > CHAR_BUDGET) break;
+    block += entry;
+    charCount += entry.length;
+    smoCount++;
+  }
+
+  const header = `MEMORY CONTEXT: ${smoCount} memories, ${sourceCount} sources\n\n`;
+  return { block: header + block.trim(), smoCount, sourceCount, charCount: header.length + charCount };
+}
+
 export function buildRollupPrompt(
   layer: 2 | 3,
   dateStart: string,

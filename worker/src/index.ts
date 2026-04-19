@@ -23,6 +23,7 @@ import {
 import { generateRawApiKey, hashKey } from './db/utils.js';
 import { runIngestionPipeline } from './ingestion/pipeline.js';
 import { runSmoGenerationPipeline } from './llm/smo.js';
+import { handleIntelligenceQuery } from './intelligence/query.js';
 import { json, notFound, unauthorized, cors } from './utils/responses.js';
 
 export default {
@@ -190,23 +191,27 @@ export default {
 
     // GET /api/settings
     if (path === '/api/settings' && request.method === 'GET') {
-      const [gdriveFolder, workflowyKey, slackToken, oauthToken] = await Promise.all([
+      const [gdriveFolder, workflowyKey, slackToken, intelligenceSystemPrompt, intelligenceContext, oauthToken] = await Promise.all([
         getConfig(env.DB, userId, 'gdrive_folder_id'),
         getConfig(env.DB, userId, 'workflowy_api_key'),
         getConfig(env.DB, userId, 'slack_token'),
+        getConfig(env.DB, userId, 'intelligence_system_prompt'),
+        getConfig(env.DB, userId, 'intelligence_context'),
         getOAuthToken(env.DB, userId),
       ]);
       return json({
         gdrive_folder_id: gdriveFolder,
         workflowy_api_key: workflowyKey ? '••••••••' : null,
         slack_token: slackToken ? '••••••••' : null,
+        intelligence_system_prompt: intelligenceSystemPrompt,
+        intelligence_context: intelligenceContext,
         connections: { google: !!oauthToken },
       });
     }
 
     // PUT /api/settings
     if (path === '/api/settings' && request.method === 'PUT') {
-      const body = await request.json<{ gdrive_folder_id?: string; workflowy_api_key?: string; slack_token?: string }>();
+      const body = await request.json<{ gdrive_folder_id?: string; workflowy_api_key?: string; slack_token?: string; intelligence_system_prompt?: string; intelligence_context?: string }>();
       if (body.gdrive_folder_id !== undefined) {
         await setConfig(env.DB, userId, 'gdrive_folder_id', body.gdrive_folder_id);
       }
@@ -216,7 +221,18 @@ export default {
       if (body.slack_token !== undefined) {
         await setConfig(env.DB, userId, 'slack_token', body.slack_token);
       }
+      if (body.intelligence_system_prompt !== undefined) {
+        await setConfig(env.DB, userId, 'intelligence_system_prompt', body.intelligence_system_prompt);
+      }
+      if (body.intelligence_context !== undefined) {
+        await setConfig(env.DB, userId, 'intelligence_context', body.intelligence_context);
+      }
       return json({ ok: true });
+    }
+
+    // POST /api/intelligence/query
+    if (path === '/api/intelligence/query' && request.method === 'POST') {
+      return handleIntelligenceQuery(request, env, userId, ctx);
     }
 
     // POST /api/admin/ingest/trigger

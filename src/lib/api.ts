@@ -99,6 +99,24 @@ export interface ApiKeyRecord {
   created_at: string;
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface IntelligenceFilters {
+  q: string;
+  layer?: number;
+  from?: string;
+  to?: string;
+}
+
+export interface ContextMeta {
+  smo_count: number;
+  source_count: number;
+  token_estimate: number;
+}
+
 export const api = {
   auth: {
     me: () => apiFetch<{ id: string; email: string } | null>('/api/auth/me'),
@@ -128,9 +146,21 @@ export const api = {
   },
 
   settings: {
-    get: () => apiFetch<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; slack_token: string | null; connections: { google: boolean } }>('/api/settings'),
-    update: (data: { gdrive_folder_id?: string; workflowy_api_key?: string; slack_token?: string }) =>
-      apiFetch<{ ok: boolean }>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
+    get: () => apiFetch<{
+      gdrive_folder_id: string | null;
+      workflowy_api_key: string | null;
+      slack_token: string | null;
+      intelligence_system_prompt: string | null;
+      intelligence_context: string | null;
+      connections: { google: boolean };
+    }>('/api/settings'),
+    update: (data: {
+      gdrive_folder_id?: string;
+      workflowy_api_key?: string;
+      slack_token?: string;
+      intelligence_system_prompt?: string;
+      intelligence_context?: string;
+    }) => apiFetch<{ ok: boolean }>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
   },
 
   keys: {
@@ -145,5 +175,58 @@ export const api = {
       apiFetch<{ ok: boolean }>('/api/admin/ingest/trigger', { method: 'POST', body: JSON.stringify({ date }) }),
     triggerSmo: (date?: string) =>
       apiFetch<{ ok: boolean }>(`/api/admin/smo/generate${date ? `?date=${date}` : ''}`, { method: 'POST' }),
+  },
+
+  intelligence: {
+    query: async (
+      payload: { question: string; history: ChatMessage[]; filters: IntelligenceFilters },
+      callbacks: {
+        onMeta: (meta: ContextMeta) => void;
+        onChunk: (text: string) => void;
+        onDone: () => void;
+        onError: (err: Error) => void;
+      },
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      const resp = await fetch(`${API_URL}/api/intelligence/query`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      });
+
+      if (resp.status === 401) { window.location.href = '/'; return; }
+      if (!resp.ok) { callbacks.onError(new Error(`API error ${resp.status}`)); return; }
+
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split('\n\n');
+          buffer = blocks.pop() ?? '';
+          for (const block of blocks) {
+            let event = 'message';
+            let data = '';
+            for (const line of block.split('\n')) {
+              if (line.startsWith('event: ')) event = line.slice(7).trim();
+              else if (line.startsWith('data: ')) data = line.slice(6).trim();
+            }
+            if (!data) continue;
+            if (event === 'meta') callbacks.onMeta(JSON.parse(data) as ContextMeta);
+            else if (event === 'chunk') callbacks.onChunk((JSON.parse(data) as { text: string }).text);
+            else if (event === 'done') callbacks.onDone();
+            else if (event === 'error') callbacks.onError(new Error((JSON.parse(data) as { message: string }).message));
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    },
   },
 };
