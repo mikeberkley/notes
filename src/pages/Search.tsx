@@ -453,6 +453,8 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   const [streamingContent, setStreamingContent] = useState('');
   const [contextMeta, setContextMeta] = useState<ContextMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -518,7 +520,27 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
     setStreaming(false);
     setContextMeta(null);
     setError(null);
+    setSaveState('idle');
+    setSessionId(crypto.randomUUID()); // new session ID = next save creates a new source
     inputRef.current?.focus();
+  }
+
+  async function saveSession() {
+    if (!history.length || !contextMeta || saveState === 'saving') return;
+    setSaveState('saving');
+    try {
+      await api.chatSessions.save({
+        sessionId,
+        messages: history,
+        contextMeta,
+        filters: { q: filters.q, layer: filters.layer, from: filters.from, to: filters.to },
+      });
+      setSaveState('saved');
+      setTimeout(() => setSaveState('idle'), 3000);
+    } catch {
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 3000);
+    }
   }
 
   const hasContent = history.length > 0 || streaming;
@@ -536,12 +558,21 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
           )}
         </div>
         {hasContent && (
-          <button
-            onClick={clearConversation}
-            className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors"
-          >
-            Clear
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={saveSession}
+              disabled={streaming || saveState === 'saving' || !history.length}
+              className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : saveState === 'error' ? 'Error saving' : 'Save session'}
+            </button>
+            <button
+              onClick={clearConversation}
+              className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
         )}
       </div>
 

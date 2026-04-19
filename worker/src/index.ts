@@ -19,6 +19,7 @@ import {
   createApiKey,
   listApiKeys,
   deleteApiKey,
+  upsertChatSession,
 } from './db/queries.js';
 import { generateRawApiKey, hashKey } from './db/utils.js';
 import { runIngestionPipeline } from './ingestion/pipeline.js';
@@ -155,6 +156,9 @@ export default {
               }
             }
             break;
+          case 'chat':
+            label = `Chat: ${String(meta.title ?? 'Intelligence session')}`;
+            break;
           default:
             label = rs.source_type;
         }
@@ -233,6 +237,53 @@ export default {
     // POST /api/intelligence/query
     if (path === '/api/intelligence/query' && request.method === 'POST') {
       return handleIntelligenceQuery(request, env, userId, ctx);
+    }
+
+    // POST /api/chat-sessions
+    if (path === '/api/chat-sessions' && request.method === 'POST') {
+      const body = await request.json<{
+        sessionId: string;
+        messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+        contextMeta: { smo_count: number; source_count: number; token_estimate: number };
+        filters: { q: string; layer?: number; from?: string; to?: string };
+      }>();
+
+      const { sessionId, messages, contextMeta, filters } = body;
+      if (!sessionId || !messages?.length) return json({ error: 'sessionId and messages required' }, 400);
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      const filterParts = [
+        filters.q ? `keyword: "${filters.q}"` : null,
+        filters.layer ? `layer: ${filters.layer}` : null,
+        filters.from ? `from: ${filters.from}` : null,
+        filters.to ? `to: ${filters.to}` : null,
+      ].filter(Boolean);
+      const filterDesc = filterParts.length ? filterParts.join(', ') : 'all memories';
+
+      const lines: string[] = [
+        'INTELLIGENCE CHAT SESSION',
+        `Date: ${today}`,
+        `Context: ${contextMeta.smo_count} memories, ${contextMeta.source_count} sources (${filterDesc})`,
+        '',
+      ];
+      for (const msg of messages) {
+        lines.push('---', '', `${msg.role === 'user' ? 'Q' : 'A'}: ${msg.content}`, '');
+      }
+
+      const firstQuestion = messages.find(m => m.role === 'user')?.content ?? 'Chat session';
+      const title = firstQuestion.length > 80 ? firstQuestion.slice(0, 77) + '…' : firstQuestion;
+
+      const metadata = {
+        title,
+        question_count: messages.filter(m => m.role === 'user').length,
+        context_smo_count: contextMeta.smo_count,
+        context_source_count: contextMeta.source_count,
+        filters,
+      };
+
+      await upsertChatSession(env.DB, userId, sessionId, lines.join('\n'), metadata, today);
+      return json({ ok: true });
     }
 
     // POST /api/admin/ingest/trigger

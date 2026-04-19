@@ -59,7 +59,7 @@ export interface SmoDetail {
 export interface RawSource {
   id: string;
   user_id: string;
-  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar' | 'slack';
+  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar' | 'slack' | 'chat';
   external_id: string;
   source_date: string;
   ingested_at: string;
@@ -175,6 +175,15 @@ export const api = {
       apiFetch<{ ok: boolean }>('/api/admin/ingest/trigger', { method: 'POST', body: JSON.stringify({ date }) }),
     triggerSmo: (date?: string) =>
       apiFetch<{ ok: boolean }>(`/api/admin/smo/generate${date ? `?date=${date}` : ''}`, { method: 'POST' }),
+  },
+
+  chatSessions: {
+    save: (payload: {
+      sessionId: string;
+      messages: ChatMessage[];
+      contextMeta: ContextMeta;
+      filters: IntelligenceFilters;
+    }) => apiFetch<{ ok: boolean }>('/api/chat-sessions', { method: 'POST', body: JSON.stringify(payload) }),
   },
 
   intelligence: {

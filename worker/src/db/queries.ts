@@ -87,7 +87,7 @@ export async function refreshOAuthAccessToken(
 export async function insertRawSource(
   db: D1Database,
   userId: string,
-  sourceType: 'gmail' | 'gdrive' | 'workflowy' | 'slack' | 'gcalendar',
+  sourceType: 'gmail' | 'gdrive' | 'workflowy' | 'slack' | 'gcalendar' | 'chat',
   externalId: string,
   content: string,
   metadata: object,
@@ -98,6 +98,44 @@ export async function insertRawSource(
     INSERT OR IGNORE INTO raw_sources (id, user_id, source_type, external_id, content, metadata, source_date)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(id, userId, sourceType, externalId, content, JSON.stringify(metadata), sourceDate).run();
+}
+
+// Upsert a chat session source — same sessionId overwrites the prior save,
+// clearing summary fields so the pipeline re-summarizes the updated transcript.
+export async function upsertChatSession(
+  db: D1Database,
+  userId: string,
+  sessionId: string,
+  content: string,
+  metadata: object,
+  sourceDate: string,
+): Promise<string> {
+  const id = randomUUID();
+  // The UNIQUE(user_id, source_type, external_id) constraint ensures the ON CONFLICT fires
+  // when the same sessionId is saved again, updating in-place rather than inserting a new row.
+  const result = await db.prepare(`
+    INSERT INTO raw_sources (id, user_id, source_type, external_id, content, metadata, source_date)
+    VALUES (?, ?, 'chat', ?, ?, ?, ?)
+    ON CONFLICT(user_id, source_type, external_id) DO UPDATE SET
+      content       = excluded.content,
+      metadata      = excluded.metadata,
+      source_date   = excluded.source_date,
+      summary       = NULL,
+      key_decisions = NULL,
+      key_entities  = NULL,
+      keywords      = NULL,
+      open_questions = NULL,
+      summarized_at = NULL,
+      summary_error = NULL
+    RETURNING id
+  `).bind(id, userId, sessionId, content, JSON.stringify(metadata), sourceDate).first<{ id: string }>();
+
+  const rowId = result?.id ?? id;
+
+  // Remove stale FTS entry so old summary data doesn't linger in search
+  await db.prepare('DELETE FROM raw_sources_fts WHERE raw_source_id = ?').bind(rowId).run();
+
+  return rowId;
 }
 
 export async function getRawSourcesByDate(
@@ -391,6 +429,7 @@ export async function searchSmos(
              WHEN 'gdrive'    THEN 'Drive: '     || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
              WHEN 'workflowy' THEN 'Workflowy: ' || COALESCE(json_extract(rs.metadata, '$.root_name'), 'Note')
              WHEN 'gcalendar' THEN 'Calendar: '  || COALESCE(json_extract(rs.metadata, '$.title'), 'Event')
+             WHEN 'chat'      THEN 'Chat: '      || COALESCE(json_extract(rs.metadata, '$.title'), 'Session')
              WHEN 'slack' THEN CASE json_extract(rs.metadata, '$.type')
                WHEN 'dm' THEN 'Slack DM: ' || COALESCE(json_extract(rs.metadata, '$.with_user'), 'Unknown')
                ELSE 'Slack: #' || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')

@@ -2,7 +2,7 @@ export const SYSTEM_PROMPT = `You are a memory assistant. Your job is to read a 
 Respond ONLY with a single valid JSON object. No markdown, no explanation, no extra text — just the JSON.`;
 
 export function buildSourceSummaryPrompt(
-  sourceType: 'gmail' | 'gdrive' | 'workflowy' | 'slack',
+  sourceType: 'gmail' | 'gdrive' | 'workflowy' | 'slack' | 'chat',
   metadata: string,
   content: string,
 ): string {
@@ -22,6 +22,14 @@ export function buildSourceSummaryPrompt(
 - This is a hierarchical outline. Treat each bullet as a discrete item.
 - Capture VERBATIM names of initiatives, projects, strategies, and action items as keywords (e.g. "Accelerate internal development", "ICP refinement").
 - Do not paraphrase named items — copy them exactly as they appear.`;
+  } else if (sourceType === 'chat') {
+    label = `INTELLIGENCE CHAT — ${meta.title ?? 'Q&A session'}`;
+    contentLabel = 'saved intelligence chat session (Q&A conversation between the user and an AI assistant about their notes)';
+    extraInstructions = `
+- Each "Q:" line is a question from the user; each "A:" line is the AI assistant's response
+- key_decisions should capture conclusions or decisions the user reached during or after the conversation
+- keywords should include the main topics and named items discussed
+- open_questions should capture questions raised in the conversation that were not fully resolved`;
   } else if (sourceType === 'slack' && meta.type === 'dm') {
     label = `SLACK DM — Conversation with ${meta.with_user ?? 'unknown'} (${meta.message_count ?? 0} messages)`;
     contentLabel = 'Slack DM conversation';
@@ -79,6 +87,8 @@ export function buildLayer1Prompt(date: string, sources: Array<{
     let label: string;
     if (s.type === 'gmail') {
       label = `[EMAIL] Subject: ${meta.subject} | From: ${meta.sender}`;
+    } else if (s.type === 'chat') {
+      label = `[CHAT] ${meta.title ?? 'Intelligence session'}`;
     } else if (s.type === 'gcalendar') {
       label = `[CALENDAR] ${meta.title}${meta.location ? ` | Location: ${meta.location}` : ''}`;
     } else if (s.type === 'slack' && meta.type === 'dm') {
