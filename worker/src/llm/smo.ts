@@ -86,6 +86,7 @@ export async function summarizeRawSources(env: Env, userId: string, date: string
         parsed.key_entities,
         parsed.keywords,
         parsed.open_questions,
+        source.content,
       );
       succeeded++;
       console.log(`[summarize] ✓ ${label}`);
