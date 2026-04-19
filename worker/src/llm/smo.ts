@@ -41,6 +41,10 @@ export function parseSourceSummaryResponse(raw: string): SourceSummaryResponse {
   if (!Array.isArray(parsed.key_decisions)) parsed.key_decisions = [];
   if (!Array.isArray(parsed.key_entities)) parsed.key_entities = [];
   if (!Array.isArray(parsed.keywords)) parsed.keywords = [];
+  // Normalize open_questions: array → newline-joined string, string → keep, else null
+  const oq = (parsed as { open_questions?: unknown }).open_questions;
+  if (Array.isArray(oq)) parsed.open_questions = (oq as string[]).filter(Boolean).join('\n') || null;
+  else if (typeof oq !== 'string') parsed.open_questions = null;
   return parsed;
 }
 
@@ -112,7 +116,10 @@ export function parseLLMResponse(raw: string): LLMSmoResponse {
   if (!Array.isArray(parsed.themes)) parsed.themes = [];
   if (!Array.isArray(parsed.keywords)) parsed.keywords = [];
   if (!Array.isArray(parsed.key_entities)) parsed.key_entities = [];
-  if (parsed.open_questions === undefined) parsed.open_questions = null;
+  // Normalize open_questions: array → newline-joined string, string → keep, else null
+  const oq = (parsed as { open_questions?: unknown }).open_questions;
+  if (Array.isArray(oq)) parsed.open_questions = (oq as string[]).filter(Boolean).join('\n') || null;
+  else if (typeof oq !== 'string') parsed.open_questions = null;
   if (parsed.location === undefined) parsed.location = null;
 
   // Clamp themes to 1–5

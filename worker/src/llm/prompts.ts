@@ -51,7 +51,7 @@ Respond ONLY with a JSON object matching this exact schema:
   "key_decisions": ["string"],    // specific decisions made or agreed upon; empty array if none
   "key_entities": ["string"],     // people, organizations, projects, named initiatives, and places mentioned
   "keywords": ["string"],         // 5 to 15 keywords: include specific topic words AND verbatim names of initiatives, strategies, projects, and action items
-  "open_questions": "string | null"  // unresolved questions or action items raised; null if none
+  "open_questions": ["string"] | null  // list of unresolved items or action items; null if none
 }
 
 Rules:
@@ -59,7 +59,7 @@ Rules:
 - key_entities should include proper nouns AND named projects, initiatives, and strategies (e.g. "ICP refinement", "monolith decoupling")
 - keywords must include VERBATIM multi-word phrases for named items — do not paraphrase or generalize them
 - keywords should be specific, not generic words like "email" or "document"
-- open_questions is a single string summarizing any unresolved items, or null${extraInstructions}`;
+- open_questions is an array of short strings, one per unresolved item or action item (does not need to be phrased as a question); null if none${extraInstructions}`;
 }
 
 export function buildLayer1Prompt(date: string, sources: Array<{
@@ -127,7 +127,7 @@ Generate a structured memory object conforming EXACTLY to this JSON schema:
   ],
   "keywords": ["string"],
   "key_entities": ["string"],
-  "open_questions": "string | null",
+  "open_questions": ["string"] | null,
   "location": "string | null"
 }
 
@@ -135,7 +135,7 @@ Rules:
 - themes array must have between 1 and 5 items
 - Each theme summary must be exactly 2 sentences
 - keywords and key_entities must be arrays of strings (5–15 keywords)
-- open_questions is a single string or null
+- open_questions is an array of short strings (one per unresolved item or action item; does not need to be phrased as a question), or null if none
 - location must be "City, Country" (e.g. "New York, USA") inferred from calendar event locations, or null if not determinable
 - Do not include date_range fields
 - If there is no meaningful content, generate a valid object with headline "No notable activity" and an empty themes array`;
