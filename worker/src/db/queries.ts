@@ -387,77 +387,96 @@ export async function searchSmos(
     return true;
   });
 
-  // For SMO-level matches, find which of their linked sources also match the query (FTS)
-  // Only show sources that actually contain the keyword — not all linked sources
+  // For SMO-level matches: prefer sources that also match the keyword (with snippets);
+  // fall back to all linked sources as plain links if none match.
+  type SourceRow = { smo_id: string; source_type: string; metadata: string; external_id: string; snippet: string; source_label: string; source_url: string | null };
+  const SOURCE_LABEL_SQL = `CASE rs.source_type
+    WHEN 'gmail'     THEN 'Gmail: '     || COALESCE(json_extract(rs.metadata, '$.subject'), '(no subject)')
+    WHEN 'gdrive'    THEN 'Drive: '     || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
+    WHEN 'workflowy' THEN 'Workflowy: ' || COALESCE(json_extract(rs.metadata, '$.root_name'), 'Note')
+    WHEN 'gcalendar' THEN 'Calendar: '  || COALESCE(json_extract(rs.metadata, '$.title'), 'Event')
+    WHEN 'slack' THEN CASE json_extract(rs.metadata, '$.type')
+      WHEN 'dm' THEN 'Slack DM: ' || COALESCE(json_extract(rs.metadata, '$.with_user'), 'Unknown')
+      ELSE 'Slack: #' || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')
+    END
+    ELSE rs.source_type
+  END`;
+  const SOURCE_URL_SQL = `CASE rs.source_type
+    WHEN 'gmail'     THEN 'https://mail.google.com/mail/u/0/#inbox/' || rs.external_id
+    WHEN 'gdrive'    THEN 'https://drive.google.com/file/d/' ||
+                          CASE WHEN INSTR(rs.external_id, '::') > 0
+                            THEN SUBSTR(rs.external_id, 1, INSTR(rs.external_id, '::') - 1)
+                            ELSE rs.external_id
+                          END || '/view'
+    WHEN 'workflowy' THEN 'https://workflowy.com/#' || COALESCE(json_extract(rs.metadata, '$.root_node_id'), '')
+    WHEN 'gcalendar' THEN 'https://calendar.google.com/calendar/r'
+    WHEN 'slack'     THEN CASE json_extract(rs.metadata, '$.type')
+      WHEN 'channel' THEN 'https://app.slack.com/archives/' ||
+                           SUBSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2), 1,
+                             INSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2) || '::', '::') - 1)
+      ELSE NULL
+    END
+    ELSE NULL
+  END`;
+
   let expandedSmoResults: typeof dedupedSmoResults = [];
   if (dedupedSmoResults.length > 0) {
     const smoIds = dedupedSmoResults.map(r => r.smo_id);
-    const { results: matchingSources } = await db.prepare(`
+    const inClause = smoIds.map(() => '?').join(',');
+
+    // Query A: sources that also match the keyword via FTS (preferred — include snippets)
+    const { results: ftsSources } = await db.prepare(`
       SELECT DISTINCT sp.smo_id, rs.source_type, rs.metadata, rs.external_id,
              (COALESCE(rs.summary, '') || ' ' || COALESCE(rs.key_entities, '') || ' ' || COALESCE(rs.keywords, '')) as snippet,
-             CASE rs.source_type
-               WHEN 'gmail'     THEN 'Gmail: '     || COALESCE(json_extract(rs.metadata, '$.subject'), '(no subject)')
-               WHEN 'gdrive'    THEN 'Drive: '     || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
-               WHEN 'workflowy' THEN 'Workflowy: ' || COALESCE(json_extract(rs.metadata, '$.root_name'), 'Note')
-               WHEN 'gcalendar' THEN 'Calendar: '  || COALESCE(json_extract(rs.metadata, '$.title'), 'Event')
-               WHEN 'slack' THEN CASE json_extract(rs.metadata, '$.type')
-                 WHEN 'dm' THEN 'Slack DM: ' || COALESCE(json_extract(rs.metadata, '$.with_user'), 'Unknown')
-                 ELSE 'Slack: #' || COALESCE(json_extract(rs.metadata, '$.channel_name'), 'channel')
-               END
-               ELSE rs.source_type
-             END as source_label,
-             CASE rs.source_type
-               WHEN 'gmail'     THEN 'https://mail.google.com/mail/u/0/#inbox/' || rs.external_id
-               WHEN 'gdrive'    THEN 'https://drive.google.com/file/d/' ||
-                                     CASE WHEN INSTR(rs.external_id, '::') > 0
-                                       THEN SUBSTR(rs.external_id, 1, INSTR(rs.external_id, '::') - 1)
-                                       ELSE rs.external_id
-                                     END || '/view'
-               WHEN 'workflowy' THEN 'https://workflowy.com/#' || COALESCE(json_extract(rs.metadata, '$.root_node_id'), '')
-               WHEN 'gcalendar' THEN 'https://calendar.google.com/calendar/r'
-               WHEN 'slack'     THEN CASE json_extract(rs.metadata, '$.type')
-                 WHEN 'channel' THEN 'https://app.slack.com/archives/' ||
-                                      SUBSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2), 1,
-                                        INSTR(SUBSTR(rs.external_id, INSTR(rs.external_id, '::') + 2) || '::', '::') - 1)
-                 ELSE NULL
-               END
-               ELSE NULL
-             END as source_url
+             ${SOURCE_LABEL_SQL} as source_label,
+             ${SOURCE_URL_SQL} as source_url
       FROM raw_sources_fts rsfts
       INNER JOIN raw_sources rs ON rs.id = rsfts.raw_source_id
       INNER JOIN source_pointers sp ON sp.target_id = rs.id AND sp.target_type = 'raw_source'
-      WHERE raw_sources_fts MATCH ? AND rsfts.user_id = ?
-        AND sp.smo_id IN (${smoIds.map(() => '?').join(',')})
-    `).bind(ftsQuery, userId, ...smoIds).all<{
-      smo_id: string; source_type: string; metadata: string; external_id: string;
-      snippet: string; source_label: string; source_url: string | null;
-    }>();
+      WHERE raw_sources_fts MATCH ? AND rsfts.user_id = ? AND sp.smo_id IN (${inClause})
+    `).bind(ftsQuery, userId, ...smoIds).all<SourceRow>();
 
-    // Resolve Workflowy deep-links for SMO-level source matches
-    for (const src of matchingSources) {
+    // Query B: all linked sources (fallback when FTS finds nothing for a given SMO)
+    const { results: allSources } = await db.prepare(`
+      SELECT DISTINCT sp.smo_id, rs.source_type, rs.metadata, rs.external_id,
+             '' as snippet,
+             ${SOURCE_LABEL_SQL} as source_label,
+             ${SOURCE_URL_SQL} as source_url
+      FROM source_pointers sp
+      INNER JOIN raw_sources rs ON rs.id = sp.target_id AND sp.target_type = 'raw_source'
+      WHERE sp.smo_id IN (${inClause}) AND rs.user_id = ?
+    `).bind(...smoIds, userId).all<SourceRow>();
+
+    // Resolve Workflowy deep-links
+    for (const src of [...ftsSources, ...allSources]) {
       if (src.source_type === 'workflowy' && src.metadata) {
         try {
           const meta = JSON.parse(src.metadata) as { node_index?: [string, string][]; root_node_id?: string };
-          const nodeIndex = meta.node_index ?? [];
-          const match = nodeIndex.find(([, text]) => queryWords.some(w => text.toLowerCase().includes(w)));
+          const match = (meta.node_index ?? []).find(([, text]) => queryWords.some(w => text.toLowerCase().includes(w)));
           if (match) src.source_url = `https://workflowy.com/#${match[0]}`;
         } catch { /* leave root URL */ }
       }
     }
 
-    // Group matching sources by smo_id
-    const sourcesBySmo = new Map<string, typeof matchingSources>();
-    for (const src of matchingSources) {
-      const arr = sourcesBySmo.get(src.smo_id) ?? [];
+    const ftsSourcesBySmo = new Map<string, SourceRow[]>();
+    for (const src of ftsSources) {
+      const arr = ftsSourcesBySmo.get(src.smo_id) ?? [];
       arr.push(src);
-      sourcesBySmo.set(src.smo_id, arr);
+      ftsSourcesBySmo.set(src.smo_id, arr);
+    }
+    const allSourcesBySmo = new Map<string, SourceRow[]>();
+    for (const src of allSources) {
+      const arr = allSourcesBySmo.get(src.smo_id) ?? [];
+      arr.push(src);
+      allSourcesBySmo.set(src.smo_id, arr);
     }
 
     for (const smo of dedupedSmoResults) {
-      // Always emit the base SMO row (carries the match snippet)
       expandedSmoResults.push(smo);
-      // Emit one row per source that also matched the keyword, with its own snippet
-      for (const src of sourcesBySmo.get(smo.smo_id) ?? []) {
+      const sources = ftsSourcesBySmo.get(smo.smo_id)?.length
+        ? ftsSourcesBySmo.get(smo.smo_id)!       // keyword matched — show with snippets
+        : allSourcesBySmo.get(smo.smo_id) ?? [];  // fallback — show all as plain links
+      for (const src of sources) {
         expandedSmoResults.push({ ...smo, snippet: src.snippet, source_label: src.source_label, source_url: src.source_url } as typeof smo & { source_label: string; source_url: string | null });
       }
     }
