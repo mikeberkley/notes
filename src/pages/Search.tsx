@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, type SearchResult, type SmoDetail } from '../lib/api.js';
+import { api, type SearchResult, type SmoDetail, type SourceSummaryItem } from '../lib/api.js';
 
 const LAYER_LABELS: Record<number, string> = { 1: 'Day', 2: 'Week', 3: 'Month' };
 const LAYER_COLORS: Record<number, string> = {
@@ -125,6 +125,7 @@ type SourceMatch = { source_label: string; snippet: string; source_url?: string 
 function MemoryCard({ result, sources, heat, query }: { result: SearchResult; sources: SourceMatch[]; heat?: HeatLabel; query: string }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<SmoDetail | null>(null);
+  const [srcSummaries, setSrcSummaries] = useState<SourceSummaryItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -138,7 +139,12 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
   async function toggle() {
     if (!expanded && !detail) {
       setLoading(true);
-      try { await fetchDetail(); } catch (err) { console.error(err); } finally { setLoading(false); }
+      try {
+        await Promise.all([
+          fetchDetail(),
+          api.smos.sourceSummaries(result.smo_id).then(setSrcSummaries),
+        ]);
+      } catch (err) { console.error(err); } finally { setLoading(false); }
     }
     setExpanded(e => !e);
   }
@@ -234,12 +240,54 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
       {/* Expanded detail */}
       {expanded && detail && (
         <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-4">
-          {/* Summary paragraph */}
-          <p className="text-sm text-gray-700 leading-relaxed">{detail.summary}</p>
+
+          {/* Key decisions */}
+          {detail.key_decisions && detail.key_decisions.length > 0 && (
+            <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+              <p className="text-xs font-semibold text-green-700 mb-1">Key decisions</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                {detail.key_decisions.map((d, i) => (
+                  <li key={i} className="text-xs text-green-900">{d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Open questions */}
+          {detail.open_questions && (
+            <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+              <p className="text-xs font-semibold text-amber-700 mb-1">Open questions</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                {detail.open_questions.split('\n').map((q, i) => {
+                  const text = q.trim();
+                  return text ? <li key={i} className="text-xs text-amber-900">{text}</li> : null;
+                })}
+              </ul>
+            </div>
+          )}
+
+          {/* Sources */}
+          {srcSummaries && srcSummaries.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Sources</p>
+              {srcSummaries.map(src => (
+                <div key={src.id} className="flex items-center gap-2 flex-wrap">
+                  {src.source_url
+                    ? <a href={src.source_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-500 font-medium hover:underline">↳ {src.label}</a>
+                    : <span className="text-xs text-indigo-500 font-medium">↳ {src.label}</span>
+                  }
+                  <a href={`/source/${src.id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-gray-400 hover:text-indigo-500 border border-gray-200 hover:border-indigo-300 rounded px-1.5 py-0.5 transition-colors">
+                    details
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Themes */}
           {detail.themes.length > 0 && (
             <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Themes</p>
               {detail.themes.map((t, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg px-3 py-2">
                   <p className="text-xs font-semibold text-gray-700">{t.headline}</p>
@@ -266,31 +314,6 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
                   ))}
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Key decisions */}
-          {detail.key_decisions && detail.key_decisions.length > 0 && (
-            <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2">
-              <p className="text-xs font-semibold text-green-700 mb-0.5">Key decisions</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                {detail.key_decisions.map((d, i) => (
-                  <li key={i} className="text-xs text-green-900">{d}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Open questions */}
-          {detail.open_questions && (
-            <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-              <p className="text-xs font-semibold text-amber-700 mb-0.5">Open questions</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                {detail.open_questions.split('\n').map((q, i) => {
-                  const text = q.trim();
-                  return text ? <li key={i} className="text-xs text-amber-900">{text}</li> : null;
-                })}
-              </ul>
             </div>
           )}
 

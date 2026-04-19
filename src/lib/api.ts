@@ -84,6 +84,14 @@ export interface RawSource {
   summary_error: string | null;
 }
 
+export interface SourceSummaryItem {
+  id: string;
+  source_type: string;
+  label: string;
+  source_url: string | null;
+  has_key_decisions: boolean;
+}
+
 export interface ApiKeyRecord {
   id: string;
   label: string;
@@ -112,6 +120,7 @@ export const api = {
     children: (id: string) => apiFetch<SmoDetail[]>(`/api/smos/${id}/children`),
     sources: (id: string) =>
       apiFetch<Array<{ target_type: string; target_id: string }>>(`/api/smos/${id}/sources`),
+    sourceSummaries: (id: string) => apiFetch<SourceSummaryItem[]>(`/api/smos/${id}/source-summaries`),
   },
 
   rawSources: {

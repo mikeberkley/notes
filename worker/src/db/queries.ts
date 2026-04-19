@@ -318,6 +318,21 @@ export async function getSourcePointers(
   return results;
 }
 
+export async function getSmoSourceSummaries(
+  db: D1Database,
+  smoId: string,
+  userId: string,
+): Promise<Array<{ id: string; source_type: string; metadata: string; external_id: string; key_decisions: string | null }>> {
+  const { results } = await db.prepare(`
+    SELECT rs.id, rs.source_type, rs.metadata, rs.external_id, rs.key_decisions
+    FROM source_pointers sp
+    JOIN raw_sources rs ON rs.id = sp.target_id AND sp.target_type = 'raw_source'
+    WHERE sp.smo_id = ? AND rs.user_id = ? AND rs.source_type != 'gcalendar'
+    ORDER BY rs.source_date DESC
+  `).bind(smoId, userId).all<{ id: string; source_type: string; metadata: string; external_id: string; key_decisions: string | null }>();
+  return results;
+}
+
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 export async function searchSmos(

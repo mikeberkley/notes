@@ -13,6 +13,7 @@ import {
   getThemesBySmoId,
   getChildSmos,
   getSourcePointers,
+  getSmoSourceSummaries,
   getRawSourceById,
   getSmosByLayerAndDate,
   createApiKey,
@@ -113,6 +114,64 @@ export default {
       if (!smo) return notFound();
       const pointers = await getSourcePointers(env.DB, smo.id);
       return json(pointers);
+    }
+
+    // GET /api/smos/:id/source-summaries
+    const smoSrcSummariesMatch = path.match(/^\/api\/smos\/([^/]+)\/source-summaries$/);
+    if (smoSrcSummariesMatch && request.method === 'GET') {
+      const smo = await getSmoById(env.DB, smoSrcSummariesMatch[1], userId);
+      if (!smo) return notFound();
+      const raw = await getSmoSourceSummaries(env.DB, smo.id, userId);
+
+      const processed = raw.map(rs => {
+        const meta = JSON.parse(rs.metadata) as Record<string, unknown>;
+        let label: string;
+        let source_url: string | null = null;
+
+        switch (rs.source_type) {
+          case 'gmail':
+            label = `Gmail: ${String(meta.subject ?? '(no subject)')}`;
+            source_url = `https://mail.google.com/mail/u/0/#inbox/${rs.external_id}`;
+            break;
+          case 'gdrive': {
+            const fileId = rs.external_id.includes('::') ? rs.external_id.split('::')[0] : rs.external_id;
+            label = `Drive: ${String(meta.filename ?? 'Untitled')}`;
+            source_url = `https://drive.google.com/file/d/${fileId}/view`;
+            break;
+          }
+          case 'workflowy':
+            label = `Workflowy: ${String(meta.root_name ?? 'Note')}`;
+            source_url = `https://workflowy.com/#${String(meta.root_node_id ?? '')}`;
+            break;
+          case 'slack':
+            if (meta.type === 'dm') {
+              label = `Slack DM: ${String(meta.with_user ?? 'Unknown')}`;
+            } else {
+              label = `Slack: #${String(meta.channel_name ?? 'channel')}`;
+              if (rs.external_id.includes('::')) {
+                const channelId = rs.external_id.split('::')[1]?.split('::')[0] ?? '';
+                source_url = `https://app.slack.com/archives/${channelId}`;
+              }
+            }
+            break;
+          default:
+            label = rs.source_type;
+        }
+
+        return {
+          id: rs.id,
+          source_type: rs.source_type,
+          label,
+          source_url,
+          has_key_decisions: !!(rs.key_decisions && (JSON.parse(rs.key_decisions) as unknown[]).length > 0),
+        };
+      }).filter(rs => {
+        // Emails only shown if they have key decisions
+        if (rs.source_type === 'gmail') return rs.has_key_decisions;
+        return true;
+      });
+
+      return json(processed);
     }
 
     // GET /api/raw-sources/:id
