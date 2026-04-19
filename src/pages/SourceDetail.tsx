@@ -50,6 +50,8 @@ export default function SourceDetail() {
   const [source, setSource] = useState<RawSource | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => { document.title = 'Source Details'; }, []);
+
   useEffect(() => {
     const id = window.location.pathname.split('/').pop();
     if (!id) { setError('No source ID in URL.'); return; }
