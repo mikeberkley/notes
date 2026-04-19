@@ -358,12 +358,19 @@ export async function searchSmos(
   const ftsQuery = trimmed.includes(' ') ? `"${trimmed}"` : `${trimmed}*`;
   const queryWords = trimmed.toLowerCase().replace(/['"]/g, '').split(/\s+/).filter(Boolean);
 
-  // Query 1: source-level FTS matches (primary)
+  type SrcRow = {
+    smo_id: string; layer: number; headline: string;
+    date_range_start: string; date_range_end: string; location: string | null;
+    snippet: string; rank: number | null; source_label: string; source_url: string | null;
+    source_type: string; metadata: string;
+  };
+
+  // Query 1: source-level FTS matches — one row per (smo, source) with best rank for that source
   let srcSql = `
-    SELECT DISTINCT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
+    SELECT sp.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
            rs.source_type, rs.metadata,
            (COALESCE(rs.summary, '') || ' ' || COALESCE(rs.key_entities, '') || ' ' || COALESCE(rs.keywords, '') || ' ' || COALESCE(rs.content, '')) as snippet,
-           NULL as rank,
+           MAX(rsfts.rank) as rank,
            CASE rs.source_type
              WHEN 'gmail'     THEN 'Gmail: '     || COALESCE(json_extract(rs.metadata, '$.subject'), '(no subject)')
              WHEN 'gdrive'    THEN 'Drive: '     || COALESCE(json_extract(rs.metadata, '$.filename'), 'Untitled')
@@ -402,15 +409,10 @@ export async function searchSmos(
   if (layer !== undefined) { srcSql += ' AND s.layer = ?'; srcParams.push(layer); }
   if (fromDate) { srcSql += ' AND s.date_range_start >= ?'; srcParams.push(fromDate); }
   if (toDate) { srcSql += ' AND s.date_range_start <= ?'; srcParams.push(toDate); }
-  srcSql += ' LIMIT ?';
+  srcSql += ' GROUP BY sp.smo_id, rs.id LIMIT ?';
   srcParams.push(limit);
 
-  const { results: sourceResults } = await db.prepare(srcSql).bind(...srcParams).all<{
-    smo_id: string; layer: number; headline: string;
-    date_range_start: string; date_range_end: string; location: string | null;
-    snippet: string; rank: number | null; source_label: string; source_url: string | null;
-    source_type: string; metadata: string;
-  }>();
+  const { results: sourceResults } = await db.prepare(srcSql).bind(...srcParams).all<SrcRow>();
 
   // Resolve Workflowy deep-links for source matches
   for (const r of sourceResults) {
@@ -428,8 +430,7 @@ export async function searchSmos(
   // SMO IDs already covered by source-level matches
   const smoIdsFromSources = new Set(sourceResults.map(r => r.smo_id));
 
-  // Query 2: SMO-level FTS matches for SMOs not already found via sources (secondary)
-  // These show snippet context only — no source links
+  // Query 2: SMO-level FTS for SMOs not already found via sources (snippet context only, no links)
   let smoSql = `
     SELECT f.smo_id, s.layer, s.headline, s.date_range_start, s.date_range_end, s.location,
            (s.summary || ' ' || COALESCE(f.keywords, '') || ' ' || COALESCE(f.key_entities, '') || ' ' || COALESCE(f.themes_text, '') || ' ' || COALESCE(s.open_questions, '')) as snippet,
@@ -457,7 +458,7 @@ export async function searchSmos(
       }>()
     : { results: [] };
 
-  // Deduplicate SMO-only results (FTS table may have multiple rows per smo_id)
+  // Deduplicate SMO-only results (FTS may return multiple rows per smo_id)
   const seenSmo = new Set<string>();
   const dedupedSmoResults = smoResults.filter(r => {
     if (seenSmo.has(r.smo_id)) return false;
@@ -465,8 +466,31 @@ export async function searchSmos(
     return true;
   });
 
-  // Source matches first, then SMO-only matches (snippet context, no source links)
-  return [...sourceResults, ...dedupedSmoResults];
+  // Compute composite rank per SMO from source matches:
+  // primary = best (max = least-negative) individual source rank; secondary = match count
+  type SmoGroup = { rows: SrcRow[]; bestRank: number; matchCount: number };
+  const smoGroups = new Map<string, SmoGroup>();
+  for (const r of sourceResults) {
+    const rank = r.rank ?? 0;
+    const g = smoGroups.get(r.smo_id);
+    if (!g) smoGroups.set(r.smo_id, { rows: [r], bestRank: rank, matchCount: 1 });
+    else { g.rows.push(r); g.bestRank = Math.max(g.bestRank, rank); g.matchCount++; }
+  }
+
+  // Sort source SMO groups by composite rank (less-negative = better, then more matches)
+  const sortedGroups = [...smoGroups.values()].sort((a, b) =>
+    a.bestRank !== b.bestRank ? b.bestRank - a.bestRank : b.matchCount - a.matchCount
+  );
+
+  // Merge source groups and SMO-only rows in rank order, then flatten
+  type Block = { rank: number; rows: SrcRow[] };
+  const blocks: Block[] = [
+    ...sortedGroups.map(g => ({ rank: g.bestRank, rows: g.rows })),
+    ...dedupedSmoResults.map(r => ({ rank: r.rank ?? 0, rows: [r as unknown as SrcRow] })),
+  ];
+  blocks.sort((a, b) => b.rank - a.rank); // less-negative first
+
+  return blocks.flatMap(b => b.rows);
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
