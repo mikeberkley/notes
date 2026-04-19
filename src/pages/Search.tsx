@@ -333,6 +333,103 @@ function MemoryCard({ result, sources, heat, query }: { result: SearchResult; so
   );
 }
 
+function renderInline(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4)
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2)
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2)
+      return <code key={i} className="bg-gray-200 text-gray-800 px-1 rounded text-xs font-mono">{part.slice(1, -1)}</code>;
+    return part;
+  });
+}
+
+function MarkdownText({ content }: { content: string }) {
+  const lines = content.split('\n');
+  const elements: React.ReactNode[] = [];
+  let listItems: string[] = [];
+  let listType: 'ul' | 'ol' | null = null;
+  let key = 0;
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    if (listType === 'ul') {
+      elements.push(
+        <ul key={key++} className="list-disc list-inside space-y-0.5 my-1 pl-1">
+          {listItems.map((item, i) => <li key={i}>{renderInline(item)}</li>)}
+        </ul>
+      );
+    } else {
+      elements.push(
+        <ol key={key++} className="list-decimal list-inside space-y-0.5 my-1 pl-1">
+          {listItems.map((item, i) => <li key={i}>{renderInline(item)}</li>)}
+        </ol>
+      );
+    }
+    listItems = [];
+    listType = null;
+  };
+
+  for (const line of lines) {
+    if (/^---+$/.test(line.trim())) {
+      flushList();
+      elements.push(<hr key={key++} className="border-gray-300 my-2" />);
+    } else if (line.startsWith('### ')) {
+      flushList();
+      elements.push(<p key={key++} className="font-semibold text-gray-800 mt-2 mb-0.5 text-sm">{renderInline(line.slice(4))}</p>);
+    } else if (line.startsWith('## ')) {
+      flushList();
+      elements.push(<p key={key++} className="font-semibold text-gray-800 mt-2 mb-0.5">{renderInline(line.slice(3))}</p>);
+    } else if (line.startsWith('# ')) {
+      flushList();
+      elements.push(<p key={key++} className="font-bold text-gray-900 mt-2 mb-1">{renderInline(line.slice(2))}</p>);
+    } else if (/^[-*] /.test(line)) {
+      if (listType !== 'ul') { flushList(); listType = 'ul'; }
+      listItems.push(line.slice(2));
+    } else if (/^\d+\. /.test(line)) {
+      if (listType !== 'ol') { flushList(); listType = 'ol'; }
+      listItems.push(line.replace(/^\d+\. /, ''));
+    } else if (line.trim() === '') {
+      flushList();
+      if (elements.length > 0) elements.push(<div key={key++} className="h-1.5" />);
+    } else {
+      flushList();
+      elements.push(<p key={key++}>{renderInline(line)}</p>);
+    }
+  }
+  flushList();
+  return <div className="space-y-0.5 leading-relaxed">{elements}</div>;
+}
+
+function AssistantBubble({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[85%] group relative">
+        <div className="rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
+          <MarkdownText content={content} />
+        </div>
+        <button
+          onClick={copy}
+          className="absolute -bottom-5 right-0 text-xs text-gray-400 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100"
+        >
+          {copied ? '✓ Copied' : 'Copy'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; from?: string; to?: string } }) {
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -434,24 +531,22 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
 
       {/* Chat history */}
       {hasContent && (
-        <div ref={scrollRef} className="max-h-96 overflow-y-auto px-4 py-3 space-y-3">
-          {history.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-100 text-gray-800'
-                }`}
-              >
-                {msg.content}
+        <div ref={scrollRef} className="max-h-96 overflow-y-auto px-4 py-3 space-y-4">
+          {history.map((msg, i) =>
+            msg.role === 'user' ? (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-indigo-600 text-white whitespace-pre-wrap leading-relaxed">
+                  {msg.content}
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <AssistantBubble key={i} content={msg.content} />
+            )
+          )}
           {streaming && streamingContent && (
             <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800 whitespace-pre-wrap leading-relaxed">
-                {streamingContent}
+              <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
+                <MarkdownText content={streamingContent} />
                 <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 animate-pulse rounded-sm" />
               </div>
             </div>
