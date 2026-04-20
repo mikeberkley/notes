@@ -458,10 +458,24 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const userScrolledRef = useRef(false);
 
   useEffect(() => {
+    if (userScrolledRef.current) return;
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [history, streamingContent]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (!streaming) return;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      userScrolledRef.current = !atBottom;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [streaming]);
 
   async function send() {
     const question = input.trim();
@@ -471,6 +485,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
     setError(null);
     setStreaming(true);
     setStreamingContent('');
+    userScrolledRef.current = false;
 
     const userMsg: ChatMessage = { role: 'user', content: question };
     setHistory(prev => [...prev, userMsg]);
