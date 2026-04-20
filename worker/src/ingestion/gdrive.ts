@@ -97,16 +97,62 @@ async function listFilesRecursive(
   return results;
 }
 
+/**
+ * List files directly shared with the user ("Shared with me"). For any shared
+ * folders, recurse into them via listFilesRecursive so we pick up their children
+ * (which won't have sharedWithMe=true themselves).
+ */
+async function listSharedWithMeFiles(
+  modifiedAfter: string,
+  accessToken: string,
+): Promise<DriveFile[]> {
+  const results: DriveFile[] = [];
+
+  const query = `sharedWithMe = true and trashed = false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,modifiedTime)&pageSize=100`;
+
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) {
+    console.error(`Drive sharedWithMe list error:`, await resp.text());
+    return results;
+  }
+
+  const data = await resp.json<{ files: Array<{ id: string; name: string; mimeType: string; modifiedTime: string }> }>();
+  const items = data.files ?? [];
+
+  for (const item of items) {
+    if (item.mimeType === 'application/vnd.google-apps.folder') {
+      // Children of a shared folder don't carry sharedWithMe=true, so recurse normally
+      const children = await listFilesRecursive(item.id, modifiedAfter, accessToken, item.name);
+      results.push(...children);
+    } else if (item.modifiedTime >= modifiedAfter) {
+      results.push({ ...item, folderPath: 'Shared with me' });
+    }
+  }
+
+  return results;
+}
+
 export async function ingestGDrive(
   db: D1Database,
   accessToken: string,
   userId: string,
   date: string, // YYYY-MM-DD
 ): Promise<void> {
-  const folderId = (await getConfig(db, userId, 'gdrive_folder_id')) ?? 'root';
+  const folderId = await getConfig(db, userId, 'gdrive_folder_id');
 
   const modifiedAfter = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const files = await listFilesRecursive(folderId, modifiedAfter, accessToken);
+
+  let files: DriveFile[];
+  if (folderId) {
+    files = await listFilesRecursive(folderId, modifiedAfter, accessToken);
+  } else {
+    const [myDriveFiles, sharedFiles] = await Promise.all([
+      listFilesRecursive('root', modifiedAfter, accessToken),
+      listSharedWithMeFiles(modifiedAfter, accessToken),
+    ]);
+    files = [...myDriveFiles, ...sharedFiles];
+  }
   console.log(`[gdrive] Found ${files.length} file(s) modified on or after ${modifiedAfter}`);
 
   for (const file of files) {
