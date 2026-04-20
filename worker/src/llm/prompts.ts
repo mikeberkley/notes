@@ -39,19 +39,9 @@ export function buildSourceSummaryPrompt(
   } else {
     const folderPath: string = meta.folder_path ?? '';
     const segments = folderPath.split('/').map(s => s.toLowerCase());
-    const isResearch = segments.some(s => s === 'research');
     const isMeetingNotes = segments.some(s => s === 'meeting notes');
 
-    if (isResearch) {
-      label = `RESEARCH DOCUMENT — ${meta.filename ?? 'unknown'}`;
-      contentLabel = 'research document containing external knowledge, insights, and learnings';
-      extraInstructions = `
-- This is a research document — it contains information, knowledge, insights, and learnings from external sources.
-- It does NOT contain personal decisions or action items. Set key_decisions to [] and open_questions to null.
-- Focus the summary on the key insights, findings, and knowledge this document provides.
-- keywords should capture the main topics, concepts, and named frameworks or methodologies discussed.
-- key_entities should cover people, organizations, and named studies or publications referenced.`;
-    } else if (isMeetingNotes) {
+    if (isMeetingNotes) {
       label = `MEETING NOTES — ${meta.filename ?? 'unknown'}`;
       contentLabel = 'meeting notes document';
     } else {

@@ -556,7 +556,6 @@ Key prompt rules:
 - Workflowy sources get extra instruction: treat each bullet as discrete, copy named items exactly
 - **Drive file prompt variants** (determined by folder path, any path segment, case-insensitive):
   - **`Meeting Notes`** folder (e.g. `Meeting Notes/2026-04-20.gdoc`): Label `MEETING NOTES` — `key_decisions` and `open_questions` are extracted normally
-  - **`Research`** folder (e.g. `Research` or `Work/Research`): Label `RESEARCH DOCUMENT` — `key_decisions` forced to `[]`, `open_questions` forced to `null`; summary focuses on insights and knowledge rather than personal decisions
   - **All other Drive files** (root or any other folder): Label `DRIVE FILE` — `key_decisions` forced to `[]`, `open_questions` forced to `null`
 
 Raw content is truncated to 80,000 chars (~20k tokens) before sending. Results are saved back to `raw_sources` (`summarized_at` timestamp prevents re-processing). On failure, `summary_error` is recorded and the source falls back to truncated raw content (4,000 chars) in the Layer 1 prompt.
