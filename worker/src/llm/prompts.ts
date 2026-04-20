@@ -38,7 +38,9 @@ export function buildSourceSummaryPrompt(
     contentLabel = 'Slack channel messages';
   } else {
     const folderPath: string = meta.folder_path ?? '';
-    const isResearch = folderPath.split('/').some(segment => segment.toLowerCase() === 'research');
+    const segments = folderPath.split('/').map(s => s.toLowerCase());
+    const isResearch = segments.some(s => s === 'research');
+    const isMeetingNotes = segments.some(s => s === 'meeting notes');
 
     if (isResearch) {
       label = `RESEARCH DOCUMENT — ${meta.filename ?? 'unknown'}`;
@@ -49,9 +51,14 @@ export function buildSourceSummaryPrompt(
 - Focus the summary on the key insights, findings, and knowledge this document provides.
 - keywords should capture the main topics, concepts, and named frameworks or methodologies discussed.
 - key_entities should cover people, organizations, and named studies or publications referenced.`;
+    } else if (isMeetingNotes) {
+      label = `MEETING NOTES — ${meta.filename ?? 'unknown'}`;
+      contentLabel = 'meeting notes document';
     } else {
       label = `DRIVE FILE — ${meta.filename ?? 'unknown'}`;
       contentLabel = 'document';
+      extraInstructions = `
+- This document is not a meeting record. Set key_decisions to [] and open_questions to null.`;
     }
   }
 
