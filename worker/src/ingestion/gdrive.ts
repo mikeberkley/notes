@@ -133,6 +133,27 @@ async function listSharedWithMeFiles(
   return results;
 }
 
+function isMeetingNotes(folderPath: string): boolean {
+  return folderPath.split('/').some(s => s.toLowerCase() === 'meeting notes');
+}
+
+/**
+ * Deduplicate files by name, preferring the copy in "Meeting Notes" over any
+ * other location. Among equally-ranked duplicates, the first encountered wins.
+ */
+function deduplicateByName(files: DriveFile[]): DriveFile[] {
+  const seen = new Map<string, DriveFile>();
+  for (const file of files) {
+    const existing = seen.get(file.name);
+    if (!existing) {
+      seen.set(file.name, file);
+    } else if (!isMeetingNotes(existing.folderPath) && isMeetingNotes(file.folderPath)) {
+      seen.set(file.name, file);
+    }
+  }
+  return Array.from(seen.values());
+}
+
 export async function ingestGDrive(
   db: D1Database,
   accessToken: string,
@@ -153,9 +174,14 @@ export async function ingestGDrive(
     ]);
     files = [...myDriveFiles, ...sharedFiles];
   }
-  console.log(`[gdrive] Found ${files.length} file(s) modified on or after ${modifiedAfter}`);
 
-  for (const file of files) {
+  const deduplicated = deduplicateByName(files);
+  if (deduplicated.length < files.length) {
+    console.log(`[gdrive] Deduplicated ${files.length - deduplicated.length} file(s) by name`);
+  }
+  console.log(`[gdrive] Ingesting ${deduplicated.length} file(s) modified on or after ${modifiedAfter}`);
+
+  for (const file of deduplicated) {
     try {
       const content = await extractText(file, accessToken);
       if (!content.trim()) continue;
