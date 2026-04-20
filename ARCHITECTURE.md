@@ -431,7 +431,11 @@ For each user with a valid Google refresh token:
   │   └── Insert into raw_sources (source_type='gmail')
 
   Google Drive ingestion (worker/src/ingestion/gdrive.ts)
-  ├── Recursively traverse configured folder and all sub-folders (requires gdrive_folder_id in config)
+  ├── If gdrive_folder_id is configured: recursively traverse that folder only
+  ├── If gdrive_folder_id is NOT configured: traverse My Drive root AND "Shared with me" in parallel
+  │   ├── My Drive root: standard recursive traversal from 'root'
+  │   └── Shared with me: query sharedWithMe=true; files get folderPath='Shared with me';
+  │       shared folders are recursed via listFilesRecursive (children don't carry sharedWithMe=true)
   │   Sub-folders are always descended regardless of their own modifiedTime — only
   │   files are filtered by modifiedTime (Drive doesn't reliably update a folder's
   │   modifiedTime when a child file changes)
@@ -843,7 +847,7 @@ The two JSON parsers (`parseLLMResponse`, `parseSourceSummaryResponse`) are the 
 After deployment, complete these steps once:
 
 - [ ] Sign in at **notes.lost2038.com** with your Google account — this creates your user row and stores OAuth tokens
-- [ ] Go to **Settings** → paste your Google Drive folder ID (copy it from the Drive URL: `drive.google.com/drive/folders/{FOLDER_ID}`)
+- [ ] Optionally: go to **Settings** → paste a Google Drive folder ID to restrict ingestion to that folder (copy from the Drive URL: `drive.google.com/drive/folders/{FOLDER_ID}`); without this, both My Drive and "Shared with me" are scanned
 - [ ] Go to **Settings** → paste your Workflowy API key (from workflowy.com → Settings → API) to enable Workflowy ingestion
 - [ ] Optionally: click **Run ingestion now** to ingest today's content immediately rather than waiting for the 02:45 UTC cron
 - [ ] Create an API key in Settings → copy and store it somewhere safe → configure the CLI: `notes config set api-key <key>`
