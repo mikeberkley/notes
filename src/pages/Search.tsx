@@ -563,9 +563,18 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   const hasContent = history.length > 0 || streaming;
 
   async function copyHistory() {
-    if (!history.length) return;
-    const text = history.map(m => `${m.role === 'user' ? 'You' : 'Assistant'}:\n${m.content}`).join('\n\n---\n\n');
-    await navigator.clipboard.writeText(text);
+    const el = scrollRef.current;
+    if (!el || !history.length) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([el.innerHTML], { type: 'text/html' }),
+          'text/plain': new Blob([el.innerText], { type: 'text/plain' }),
+        }),
+      ]);
+    } catch {
+      await navigator.clipboard.writeText(el.innerText);
+    }
     setHistoryCopied(true);
     setTimeout(() => setHistoryCopied(false), 2000);
   }
