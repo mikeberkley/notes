@@ -559,7 +559,16 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   }
 
   const [expanded, setExpanded] = useState(false);
+  const [historyCopied, setHistoryCopied] = useState(false);
   const hasContent = history.length > 0 || streaming;
+
+  async function copyHistory() {
+    if (!history.length) return;
+    const text = history.map(m => `${m.role === 'user' ? 'You' : 'Assistant'}:\n${m.content}`).join('\n\n---\n\n');
+    await navigator.clipboard.writeText(text);
+    setHistoryCopied(true);
+    setTimeout(() => setHistoryCopied(false), 2000);
+  }
 
   const panelClass = expanded
     ? 'fixed inset-4 z-50 bg-white rounded-xl border border-indigo-200 overflow-hidden shadow-2xl flex flex-col'
@@ -588,6 +597,13 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
                 className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : saveState === 'error' ? 'Error saving' : 'Save session'}
+              </button>
+              <button
+                onClick={copyHistory}
+                disabled={!history.length}
+                className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {historyCopied ? '✓ Copied' : 'Copy all'}
               </button>
               <button
                 onClick={clearConversation}
