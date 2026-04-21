@@ -552,6 +552,7 @@ Each raw source is summarized individually in a focused LLM call. Calendar event
 Key prompt rules:
 - `keywords` must include **verbatim** multi-word phrases for named items (e.g. "ICP refinement", "Accelerate internal development") — do not paraphrase
 - `key_entities` covers proper nouns AND named projects/initiatives/strategies
+- `key_decisions` must be **concrete, finalized decisions explicitly agreed upon** — hypotheses, working assumptions, and items still under debate are excluded
 - `open_questions` is an **array of strings** (one item per unresolved thing; does not need to be phrased as a question) or `null`
 - Workflowy sources get extra instruction: treat each bullet as discrete, copy named items exactly
 - **Drive file prompt variants** (determined by folder path, any path segment, case-insensitive):
@@ -588,8 +589,8 @@ Generate a structured memory object conforming EXACTLY to this JSON schema:
   "themes": [{ "headline": "...", "summary": "EXACTLY 2 sentences" }],  // 1–5 items
   "keywords": ["string"],         // 5–15
   "key_entities": ["string"],     // people, projects, orgs, places
-  "key_decisions": ["string"],    // concrete decisions made; empty array if none
-  "open_questions": ["string"] | null,  // array of unresolved items; null if none
+  "key_decisions": ["string"],    // concrete, finalized decisions only (no hypotheses); max 7 items; empty array if none
+  "open_questions": ["string"] | null,  // genuinely open strategic/substantive questions only (not routine to-dos); max 8 items; null if none
   "location": "City, Country | null"    // inferred from calendar events
 }
 ```
@@ -602,7 +603,7 @@ Fallback: if a source's summarization failed, its raw content is truncated to 4,
 ### Intelligence query prompt
 The intelligence layer uses a multi-message conversation structure:
 ```
-[system]    User's custom system prompt (or default) + always-loaded context block
+[system]    User's custom system prompt (or default) + always-loaded context block + "Today's date is <weekday, month day, year>." (America/New_York)
 [user]      MEMORY CONTEXT block (assembled SMOs + source summaries — see §21)
 [assistant] "I have reviewed your memory context and am ready to answer questions about it."
 [user/asst] …prior conversation history turns…
@@ -697,6 +698,9 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
   Multi-turn chat UI. Streams answers word-by-word. Header shows memory count, source count,
   and token estimate for the current context. Stop button cancels mid-stream. Clear resets
   the conversation. Filters (keyword, date range, layer) determine which memories are in scope.
+  Header buttons: **Save session** (persists to D1 as a chat source), **Copy all** (copies full
+  conversation to clipboard as rendered HTML), **Clear**, and an **expand/collapse** toggle that
+  overlays the panel as a full-viewport modal with a dimmed backdrop.
 
 ### SMO Detail (`/smo/:id`)
 - Full SMO: headline, summary, themes, keywords, key entities, key decisions (green), open questions (amber bullets)
