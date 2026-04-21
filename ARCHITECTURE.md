@@ -87,11 +87,11 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 │   │   │   └── session.ts          ← HS256 JWT (hand-rolled, no deps) + cookie helpers
 │   │   ├── ingestion/
 │   │   │   ├── gmail.ts            ← Gmail API: list + fetch messages, extract text/plain
-│   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs/Slides, download others
+│   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs/Slides, LLM-extract PDFs
 │   │   │   ├── workflowy.ts        ← Workflowy API: /nodes-export, tree grouping, indented outline
 │   │   │   └── pipeline.ts         ← orchestrates ingestion for all users
 │   │   ├── llm/
-│   │   │   ├── openrouter.ts       ← OpenRouter chat completions client
+│   │   │   ├── openrouter.ts       ← OpenRouter client: callLLM, callLLMWithPDF, streamChatCompletion
 │   │   │   ├── prompts.ts          ← Layer 1 and Layer 2/3 rollup prompt builders
 │   │   │   └── smo.ts              ← SMO generation + LOA rollup logic + JSON parsing
 │   │   ├── db/
@@ -443,8 +443,12 @@ For each user with a valid Google refresh token:
   │   folder_path (e.g. "Research" or "Work/Research") relative to the configured root
   ├── For each file modified within the last 24 hours (rolling window, timezone-independent):
   │   ├── Google Docs / Google Slides → Drive export API as text/plain
-  │   ├── .txt / .md                  → download raw
-  │   └── .docx / .doc / .pdf        → Drive text export (best-effort; raw UTF-8 download as fallback)
+  │   ├── .txt / .md                  → download raw bytes, decode as UTF-8
+  │   ├── .docx / .doc               → Drive export API as text/plain (best-effort)
+  │   └── .pdf                        → download binary, send to LLM as base64 document block
+  │                                     (callLLMWithPDF in openrouter.ts); max 10 MB; skipped if larger
+  │                                     Requires a model that supports PDF document blocks (default
+  │                                     anthropic/claude-sonnet-4-6 does; non-Claude models may not)
   └── Insert into raw_sources (source_type='gdrive')
        externalId = fileId::modifiedTime (re-ingests if file is updated within the window)
        metadata = { filename, mime_type, modified_time, folder_path }
