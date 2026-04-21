@@ -44,6 +44,53 @@ export async function callLLM(env: Env, systemPrompt: string, userPrompt: string
   return content;
 }
 
+export async function callLLMWithPDF(
+  env: Env,
+  systemPrompt: string,
+  pdfBase64: string,
+  textPrompt: string,
+): Promise<string> {
+  const model = env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4-6';
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+
+  let resp: Response;
+  try {
+    resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: [
+              { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+              { type: 'text', text: textPrompt },
+            ],
+          },
+        ],
+        temperature: 0.3,
+      }),
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!resp.ok) throw new Error(`OpenRouter error ${resp.status}: ${await resp.text()}`);
+
+  const data = await resp.json<{ choices: Array<{ message: { content: string } }> }>();
+  const content = data.choices[0]?.message?.content ?? '';
+  if (!content) throw new Error('OpenRouter returned empty content');
+  return content;
+}
+
 export async function* streamChatCompletion(
   env: Env,
   messages: Array<{ role: string; content: string }>,

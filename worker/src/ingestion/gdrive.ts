@@ -1,4 +1,6 @@
+import type { Env } from '../types.js';
 import { insertRawSource, getConfig } from '../db/queries.js';
+import { callLLMWithPDF } from '../llm/openrouter.js';
 
 interface DriveFile {
   id: string;
@@ -26,7 +28,20 @@ async function downloadFile(fileId: string, accessToken: string): Promise<ArrayB
   return resp.arrayBuffer();
 }
 
-async function extractText(file: DriveFile, accessToken: string): Promise<string> {
+// Max PDF size to send to the LLM (10 MB raw ≈ 13 MB base64, well within model limits)
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+    binary += String.fromCharCode(...(bytes.subarray(i, i + chunkSize) as unknown as number[]));
+  }
+  return btoa(binary);
+}
+
+async function extractText(file: DriveFile, accessToken: string, env: Env): Promise<string> {
   if (
     file.mimeType === 'application/vnd.google-apps.document' ||
     file.mimeType === 'application/vnd.google-apps.presentation'
@@ -41,17 +56,32 @@ async function extractText(file: DriveFile, accessToken: string): Promise<string
 
   if (
     file.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    file.mimeType === 'application/msword' ||
-    file.mimeType === 'application/pdf'
+    file.mimeType === 'application/msword'
   ) {
     const resp = await fetch(
       `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=text/plain`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
     if (resp.ok) return resp.text();
-    // Drive export only works for Google Workspace files; native binary files can't be decoded as text
     console.warn(`[gdrive] Skipping ${file.name} (${file.mimeType}): export to text/plain not supported`);
     return '';
+  }
+
+  if (file.mimeType === 'application/pdf') {
+    const buf = await downloadFile(file.id, accessToken);
+    if (buf.byteLength === 0) return '';
+    if (buf.byteLength > MAX_PDF_BYTES) {
+      console.warn(`[gdrive] PDF ${file.name} too large (${buf.byteLength} bytes), skipping`);
+      return '';
+    }
+    console.log(`[gdrive] Extracting text from PDF ${file.name} (${buf.byteLength} bytes) via LLM`);
+    const base64 = arrayBufferToBase64(buf);
+    return callLLMWithPDF(
+      env,
+      'You are a document text extractor. Extract all text content from the PDF exactly as it appears.',
+      base64,
+      'Extract all text from this PDF document. Preserve the structure (headings, paragraphs, bullet points, tables) as plain text. Return only the extracted text — no commentary, no preamble.',
+    );
   }
 
   return '';
@@ -159,6 +189,7 @@ export async function ingestGDrive(
   accessToken: string,
   userId: string,
   date: string, // YYYY-MM-DD
+  env: Env,
 ): Promise<void> {
   const folderId = await getConfig(db, userId, 'gdrive_folder_id');
 
@@ -183,7 +214,7 @@ export async function ingestGDrive(
 
   for (const file of deduplicated) {
     try {
-      const content = await extractText(file, accessToken);
+      const content = await extractText(file, accessToken, env);
       if (!content.trim()) continue;
 
       const metadata = { filename: file.name, mime_type: file.mimeType, modified_time: file.modifiedTime, folder_path: file.folderPath };

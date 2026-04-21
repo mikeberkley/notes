@@ -23,7 +23,7 @@ export async function runIngestionPipeline(env: Env, date?: string): Promise<voi
       }
 
       await ingestGmail(env.DB, accessToken, user.id, targetDate);
-      await ingestGDrive(env.DB, accessToken, user.id, targetDate);
+      await ingestGDrive(env.DB, accessToken, user.id, targetDate, env);
       await ingestWorkflowy(env.DB, user.id, targetDate);
       await ingestSlack(env.DB, user.id, targetDate);
       await ingestGCalendar(env.DB, accessToken, user.id, targetDate);
