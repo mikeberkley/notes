@@ -558,10 +558,17 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
     }
   }
 
+  const [expanded, setExpanded] = useState(false);
   const hasContent = history.length > 0 || streaming;
 
+  const panelClass = expanded
+    ? 'fixed inset-4 z-50 bg-white rounded-xl border border-indigo-200 overflow-hidden shadow-2xl flex flex-col'
+    : 'mb-5 bg-white rounded-xl border border-indigo-200 overflow-hidden';
+
   return (
-    <div className="mb-5 bg-white rounded-xl border border-indigo-200 overflow-hidden">
+    <>
+      {expanded && <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setExpanded(false)} />}
+      <div className={panelClass} style={expanded ? {} : undefined}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 bg-indigo-50 border-b border-indigo-100">
         <div className="flex items-center gap-2">
@@ -572,28 +579,45 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
             </span>
           )}
         </div>
-        {hasContent && (
-          <div className="flex items-center gap-3">
-            <button
-              onClick={saveSession}
-              disabled={streaming || saveState === 'saving' || !history.length}
-              className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : saveState === 'error' ? 'Error saving' : 'Save session'}
-            </button>
-            <button
-              onClick={clearConversation}
-              className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors"
-            >
-              Clear
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {hasContent && (
+            <>
+              <button
+                onClick={saveSession}
+                disabled={streaming || saveState === 'saving' || !history.length}
+                className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : saveState === 'error' ? 'Error saving' : 'Save session'}
+              </button>
+              <button
+                onClick={clearConversation}
+                className="text-xs text-indigo-400 hover:text-indigo-600 transition-colors"
+              >
+                Clear
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="text-indigo-400 hover:text-indigo-600 transition-colors"
+            title={expanded ? 'Collapse' : 'Expand'}
+          >
+            {expanded ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5 10a1 1 0 011-1h3V6a1 1 0 112 0v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 01-1-1z" clipRule="evenodd" transform="rotate(45 10 10)" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Chat history */}
       {hasContent && (
-        <div ref={scrollRef} className="max-h-96 overflow-y-auto px-4 py-3 space-y-4">
+        <div ref={scrollRef} className={`overflow-y-auto px-4 py-3 space-y-4 ${expanded ? 'flex-1' : 'max-h-96'}`}>
           {history.map((msg, i) =>
             msg.role === 'user' ? (
               <div key={i} className="flex justify-end">
@@ -665,6 +689,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
         </button>
       </div>
     </div>
+    </>
   );
 }
 
