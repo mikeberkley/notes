@@ -74,7 +74,7 @@ Respond ONLY with a JSON object matching this exact schema:
 }
 
 Rules:
-- key_decisions must be concrete decisions, not vague observations
+- key_decisions must be concrete, finalized decisions that were explicitly agreed upon — exclude hypotheses, working assumptions, options being considered, or items still under debate
 - key_entities should include proper nouns AND named projects, initiatives, and strategies (e.g. "ICP refinement", "monolith decoupling")
 - keywords must include VERBATIM multi-word phrases for named items — do not paraphrase or generalize them
 - keywords should be specific, not generic words like "email" or "document"
@@ -157,8 +157,8 @@ Rules:
 - themes array must have between 1 and 5 items
 - Each theme summary must be exactly 2 sentences
 - keywords and key_entities must be arrays of strings (5–15 keywords)
-- key_decisions must be concrete decisions made or agreed upon; empty array if none
-- open_questions is an array of short strings (one per unresolved item or action item; does not need to be phrased as a question), or null if none
+- key_decisions must contain ONLY concrete, finalized decisions that were explicitly agreed upon — not hypotheses, working assumptions, options under consideration, or things still being debated; empty array if none; maximum 7 items, prioritizing the most consequential
+- open_questions must be limited to the most important unresolved items — maximum 8 items; omit routine action items and to-dos in favor of genuinely open strategic or substantive questions; null if none
 - location must be "City, Country" (e.g. "New York, USA") inferred from calendar event locations, or null if not determinable
 - Do not include date_range fields
 - If there is no meaningful content, generate a valid object with headline "No notable activity" and an empty themes array`;
