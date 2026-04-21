@@ -173,6 +173,8 @@ export function buildIntelligenceSystemPrompt(
   if (alwaysContext?.trim()) {
     prompt += `\n\nADDITIONAL CONTEXT (always loaded):\n${alwaysContext.trim()}`;
   }
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/New_York' });
+  prompt += `\n\nToday's date is ${today}.`;
   return prompt;
 }
 
