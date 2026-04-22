@@ -76,12 +76,20 @@ async function extractText(file: DriveFile, accessToken: string, env: Env): Prom
     }
     console.log(`[gdrive] Extracting text from PDF ${file.name} (${buf.byteLength} bytes) via LLM`);
     const base64 = arrayBufferToBase64(buf);
-    return callLLMWithPDF(
+    const extracted = await callLLMWithPDF(
       env,
       'You are a document text extractor. Extract all text content from the PDF exactly as it appears.',
       base64,
       'Extract all text from this PDF document. Preserve the structure (headings, paragraphs, bullet points, tables) as plain text. Return only the extracted text — no commentary, no preamble.',
     );
+    // Sanity check: extracted text should be non-trivially long relative to PDF size.
+    // Very short output from a large PDF almost certainly means the model ignored the document.
+    const minExpectedChars = Math.min(200, buf.byteLength / 100);
+    if (extracted.trim().length < minExpectedChars) {
+      console.warn(`[gdrive] PDF extraction for ${file.name} returned suspiciously short output (${extracted.trim().length} chars from ${buf.byteLength} byte PDF) — skipping`);
+      return '';
+    }
+    return extracted;
   }
 
   return '';

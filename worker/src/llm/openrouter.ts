@@ -44,13 +44,17 @@ export async function callLLM(env: Env, systemPrompt: string, userPrompt: string
   return content;
 }
 
+// PDF document blocks require a model that supports them. Always use Claude regardless
+// of OPENROUTER_MODEL, which may be set to a model that silently ignores document blocks.
+const PDF_MODEL = 'anthropic/claude-sonnet-4-6';
+
 export async function callLLMWithPDF(
   env: Env,
   systemPrompt: string,
   pdfBase64: string,
   textPrompt: string,
 ): Promise<string> {
-  const model = env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4-6';
+  const model = PDF_MODEL;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
