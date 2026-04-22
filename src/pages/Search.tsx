@@ -718,15 +718,37 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   );
 }
 
+type Preset = 'all' | 'yesterday' | 'week' | 'digest';
+
+const PRESET_LABELS: Record<Preset, string> = {
+  all: 'All',
+  yesterday: 'Yesterday',
+  week: 'This Week',
+  digest: 'Digest',
+};
+
+function getPresetFilters(preset: Preset): { layer: number | undefined; from: string; to: string } {
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const today = new Date();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 6);
+  switch (preset) {
+    case 'yesterday': return { layer: 1, from: fmt(yesterday), to: fmt(yesterday) };
+    case 'week':      return { layer: undefined, from: fmt(weekAgo), to: fmt(today) };
+    case 'digest':    return { layer: 2, from: '', to: '' };
+    default:          return { layer: undefined, from: '', to: '' };
+  }
+}
+
 export default function Search() {
   const [query, setQuery] = useState('');
   const [resultsQuery, setResultsQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [layerFilter, setLayerFilter] = useState<number | undefined>();
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [preset, setPreset] = useState<Preset>('all');
   const [loading, setLoading] = useState(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { layer: layerFilter, from: fromDate, to: toDate } = getPresetFilters(preset);
 
   const fetchResults = useCallback(async (q: string, layer: number | undefined, from: string, to: string) => {
     setLoading(true);
@@ -796,41 +818,20 @@ export default function Search() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2 mb-5">
-          {[undefined, 1, 2, 3].map(l => (
+        <div className="flex items-center gap-2 mb-5">
+          {(Object.keys(PRESET_LABELS) as Preset[]).map(p => (
             <button
-              key={l ?? 'all'}
-              onClick={() => setLayerFilter(l)}
+              key={p}
+              onClick={() => setPreset(p)}
               className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                layerFilter === l
+                preset === p
                   ? 'bg-indigo-600 text-white border-indigo-600'
                   : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'
               }`}
             >
-              {l === undefined ? 'All layers' : `Layer ${l} · ${LAYER_LABELS[l]}`}
+              {PRESET_LABELS[p]}
             </button>
           ))}
-          <div className="flex items-center gap-1.5 ml-auto">
-            {(['from', 'to'] as const).map((which, i) => (
-              <div key={which} className="flex items-center gap-1.5">
-                {i === 1 && <span className="text-gray-400 text-xs">–</span>}
-                <div className="relative flex items-center border border-gray-300 rounded-lg focus-within:ring-1 focus-within:ring-indigo-400">
-                  <svg className="absolute left-2 h-3.5 w-3.5 text-gray-400 pointer-events-none z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                    <line x1="16" y1="2" x2="16" y2="6" />
-                    <line x1="8" y1="2" x2="8" y2="6" />
-                    <line x1="3" y1="10" x2="21" y2="10" />
-                  </svg>
-                  <input
-                    type="date"
-                    value={which === 'from' ? fromDate : toDate}
-                    onChange={e => which === 'from' ? setFromDate(e.target.value) : setToDate(e.target.value)}
-                    className="pl-7 pr-2 py-1 text-xs text-gray-600 bg-transparent focus:outline-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
 
         {/* Intelligence panel */}
@@ -845,11 +846,6 @@ export default function Search() {
             })()}
             {query && !loading && ` matching "${query}"`}
           </p>
-          {(fromDate || toDate) && (
-            <button onClick={() => { setFromDate(''); setToDate(''); }} className="text-xs text-indigo-500 hover:underline">
-              Clear dates
-            </button>
-          )}
         </div>
 
         {/* Results */}
