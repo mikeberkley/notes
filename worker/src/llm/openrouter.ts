@@ -4,7 +4,7 @@ const LLM_TIMEOUT_MS = 90_000; // 90 seconds per call — generous for large doc
 const STREAM_TIMEOUT_MS = 120_000; // 2 minutes for streaming (longer responses)
 
 export async function callLLM(env: Env, systemPrompt: string, userPrompt: string): Promise<string> {
-  const model = env.OPENROUTER_MODEL ?? 'moonshotai/kimi-k2';
+  const model = env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4-6';
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
