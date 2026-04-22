@@ -54,7 +54,7 @@ A personal notes intelligence app that ingests daily content from Gmail, Google 
                                        │               │                       │
                                 ┌──────▼──────┐  ┌─────▼───────────┐  ┌───────▼─────────────┐
                                 │ Cloudflare  │  │  Google APIs    │  │  OpenRouter         │
-                                │ D1 (SQLite) │  │  - Gmail        │  │  model: kimi-k2     │
+                                │ D1 (SQLite) │  │  - Gmail        │  │  model: claude-s4-6 │
                                 │ R2 (backups)│  │  - Drive        │  │  (configurable)     │
                                 └─────────────┘  └─────────────────┘  └─────────────────────┘
                                                  ┌─────────────────┐
@@ -447,8 +447,8 @@ For each user with a valid Google refresh token:
   │   ├── .docx / .doc               → Drive export API as text/plain (best-effort)
   │   └── .pdf                        → download binary, send to LLM as base64 document block
   │                                     (callLLMWithPDF in openrouter.ts); max 10 MB; skipped if larger
-  │                                     Requires a model that supports PDF document blocks (default
-  │                                     anthropic/claude-sonnet-4-6 does; non-Claude models may not)
+  │                                     Always uses anthropic/claude-sonnet-4-6 regardless of
+  │                                     OPENROUTER_MODEL — PDF document blocks require Claude
   └── Insert into raw_sources (source_type='gdrive')
        externalId = fileId::modifiedTime (re-ingests if file is updated within the window)
        metadata = { filename, mime_type, modified_time, folder_path }
