@@ -1,14 +1,14 @@
 # Notes App — Architecture & Implementation Reference
 
-**Last updated:** 2026-04-19  
+**Last updated:** 2026-04-24  
 **Status:** Built and deployed ✅  
-**Latest addition:** Intelligence layer (multi-turn Q&A over filtered memories)
+**Latest addition:** Confluence ingestion (delta sync of Confluence Cloud pages into the nightly pipeline)
 
 ---
 
 ## 1. Product Overview
 
-A personal notes intelligence app that ingests daily content from Gmail, Google Drive, and Workflowy, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens. The search page includes a multi-turn intelligence layer that answers questions grounded in the currently-filtered set of memories.
+A personal notes intelligence app that ingests daily content from Gmail, Google Drive, Workflowy, Slack, Google Calendar, and Confluence, uses an LLM to distill it into a structured memory hierarchy, and exposes both a search interface for human use and a read-only agent API for external AI agents and CLI tools to efficiently load context without wasting tokens. The search page includes a multi-turn intelligence layer that answers questions grounded in the currently-filtered set of memories.
 
 **URL:** notes.lost2038.com  
 **Current users:** Single (owner), schema designed for future multi-user expansion.
@@ -60,6 +60,10 @@ A personal notes intelligence app that ingests daily content from Gmail, Google 
                                                  ┌─────────────────┐
                                                  │  Workflowy API  │
                                                  └─────────────────┘
+                                                 ┌─────────────────┐
+                                                 │  Confluence API │
+                                                 │  (Atlassian)    │
+                                                 └─────────────────┘
 ```
 
 ---
@@ -89,6 +93,7 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 │   │   │   ├── gmail.ts            ← Gmail API: list + fetch messages, extract text/plain
 │   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs/Slides, LLM-extract PDFs
 │   │   │   ├── workflowy.ts        ← Workflowy API: /nodes-export, tree grouping, indented outline
+│   │   │   ├── confluence.ts       ← Confluence Cloud API: CQL delta query, HTML strip, insert raw_sources
 │   │   │   └── pipeline.ts         ← orchestrates ingestion for all users
 │   │   ├── llm/
 │   │   │   ├── openrouter.ts       ← OpenRouter client: callLLM, callLLMWithPDF, streamChatCompletion
@@ -181,13 +186,15 @@ CREATE TABLE config (
   value    TEXT NOT NULL,
   PRIMARY KEY (user_id, key)
 );
--- Keys used: gdrive_folder_id, workflowy_api_key
+-- Keys used: gdrive_folder_id, workflowy_api_key, slack_token,
+--            confluence_base_url, confluence_email, confluence_space_key, confluence_api_token,
+--            intelligence_system_prompt, intelligence_context
 
 -- Raw source material (source of truth)
 CREATE TABLE raw_sources (
   id             TEXT PRIMARY KEY,
   user_id        TEXT NOT NULL REFERENCES users(id),
-  source_type    TEXT NOT NULL,             -- 'gmail' | 'gdrive' | 'workflowy'
+  source_type    TEXT NOT NULL,             -- 'gmail' | 'gdrive' | 'workflowy' | 'slack' | 'gcalendar' | 'chat' | 'confluence'
   external_id    TEXT NOT NULL,
   content        TEXT NOT NULL,
   metadata       TEXT NOT NULL,             -- JSON: subject/sender/filename/mime_type/etc.
@@ -315,10 +322,12 @@ Raw Sources
 
 Settings
   GET  /api/settings                         → { gdrive_folder_id, workflowy_api_key: '••••••••' | null,
+                                                slack_token: '••••••••' | null,
+                                                confluence_base_url, confluence_email, confluence_space_key,
+                                                confluence_api_token: '••••••••' | null,
                                                 intelligence_system_prompt, intelligence_context,
                                                 connections: { google } }
-  PUT  /api/settings                         → update config values (gdrive_folder_id, workflowy_api_key,
-                                                intelligence_system_prompt, intelligence_context)
+  PUT  /api/settings                         → update any config values (all keys optional)
 
 Intelligence
   POST /api/intelligence/query
@@ -469,6 +478,17 @@ For each user with a valid Google refresh token:
   │         externalId = rootNodeId::date (one record per root tree per day)
   └── Note: node.note field appended below node.name if present
 ```
+
+  Confluence ingestion (worker/src/ingestion/confluence.ts)
+  ├── Skipped if confluence_base_url / confluence_email / confluence_api_token / confluence_space_key not all set
+  ├── Calls Confluence REST API v1 search with CQL:
+  │     space = "{spaceKey}" AND type = page AND lastModified >= "{date}" ORDER BY lastModified DESC
+  ├── Auth: Basic auth with base64(email:api_token)
+  ├── Paginates via _links.next until all modified pages are fetched
+  ├── Strips HTML from page body (body.storage expand) to plain text
+  └── Insert into raw_sources (source_type='confluence')
+       externalId = pageId::version.when (re-ingests if page is updated)
+       metadata = { title, space_key, page_id, modified_at }
 
 **Deduplication:** `UNIQUE(user_id, source_type, external_id)` — INSERT OR IGNORE.
 
@@ -722,9 +742,11 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
 ### Settings (`/settings`)
 - Google connection status + reconnect link
 - Google Drive folder ID input + save
-- Workflowy API key input (password field) + save — key is stored per-user in the `config` table, never as a global secret; shown as `••••••••` once saved
-- **Intelligence** — system prompt textarea + always-loaded context textarea; both stored in
-  the `config` table under `intelligence_system_prompt` and `intelligence_context`
+- Workflowy API key input (password field) + save
+- Slack token input (password field) + save
+- **Confluence** — domain (e.g. `yourteam.atlassian.net`), Atlassian email, space key, and API token
+  (from id.atlassian.com/manage-profile/security/api-tokens); all stored in `config` table; token shown as `••••••••` once saved
+- **Intelligence** — system prompt textarea + always-loaded context textarea
 - API Keys: list, create (key shown once with copy button), revoke
 - "Run ingestion now" debug button
 
