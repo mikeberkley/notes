@@ -195,13 +195,17 @@ export default {
 
     // GET /api/settings
     if (path === '/api/settings' && request.method === 'GET') {
-      const [gdriveFolder, workflowyKey, slackToken, intelligenceSystemPrompt, intelligenceContext, oauthToken] = await Promise.all([
+      const [gdriveFolder, workflowyKey, slackToken, intelligenceSystemPrompt, intelligenceContext, oauthToken, confluenceEmail, confluenceToken, confluenceSpaceKey, confluenceBaseUrl] = await Promise.all([
         getConfig(env.DB, userId, 'gdrive_folder_id'),
         getConfig(env.DB, userId, 'workflowy_api_key'),
         getConfig(env.DB, userId, 'slack_token'),
         getConfig(env.DB, userId, 'intelligence_system_prompt'),
         getConfig(env.DB, userId, 'intelligence_context'),
         getOAuthToken(env.DB, userId),
+        getConfig(env.DB, userId, 'confluence_email'),
+        getConfig(env.DB, userId, 'confluence_api_token'),
+        getConfig(env.DB, userId, 'confluence_space_key'),
+        getConfig(env.DB, userId, 'confluence_base_url'),
       ]);
       return json({
         gdrive_folder_id: gdriveFolder,
@@ -210,12 +214,16 @@ export default {
         intelligence_system_prompt: intelligenceSystemPrompt,
         intelligence_context: intelligenceContext,
         connections: { google: !!oauthToken },
+        confluence_email: confluenceEmail,
+        confluence_api_token: confluenceToken ? '••••••••' : null,
+        confluence_space_key: confluenceSpaceKey,
+        confluence_base_url: confluenceBaseUrl,
       });
     }
 
     // PUT /api/settings
     if (path === '/api/settings' && request.method === 'PUT') {
-      const body = await request.json<{ gdrive_folder_id?: string; workflowy_api_key?: string; slack_token?: string; intelligence_system_prompt?: string; intelligence_context?: string }>();
+      const body = await request.json<{ gdrive_folder_id?: string; workflowy_api_key?: string; slack_token?: string; intelligence_system_prompt?: string; intelligence_context?: string; confluence_email?: string; confluence_api_token?: string; confluence_space_key?: string; confluence_base_url?: string }>();
       if (body.gdrive_folder_id !== undefined) {
         await setConfig(env.DB, userId, 'gdrive_folder_id', body.gdrive_folder_id);
       }
@@ -230,6 +238,18 @@ export default {
       }
       if (body.intelligence_context !== undefined) {
         await setConfig(env.DB, userId, 'intelligence_context', body.intelligence_context);
+      }
+      if (body.confluence_email !== undefined) {
+        await setConfig(env.DB, userId, 'confluence_email', body.confluence_email);
+      }
+      if (body.confluence_api_token !== undefined) {
+        await setConfig(env.DB, userId, 'confluence_api_token', body.confluence_api_token);
+      }
+      if (body.confluence_space_key !== undefined) {
+        await setConfig(env.DB, userId, 'confluence_space_key', body.confluence_space_key);
+      }
+      if (body.confluence_base_url !== undefined) {
+        await setConfig(env.DB, userId, 'confluence_base_url', body.confluence_base_url);
       }
       return json({ ok: true });
     }

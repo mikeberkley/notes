@@ -59,7 +59,7 @@ export interface SmoDetail {
 export interface RawSource {
   id: string;
   user_id: string;
-  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar' | 'slack' | 'chat';
+  source_type: 'gmail' | 'gdrive' | 'workflowy' | 'gcalendar' | 'slack' | 'chat' | 'confluence';
   external_id: string;
   source_date: string;
   ingested_at: string;
@@ -153,6 +153,10 @@ export const api = {
       intelligence_system_prompt: string | null;
       intelligence_context: string | null;
       connections: { google: boolean };
+      confluence_email: string | null;
+      confluence_api_token: string | null;
+      confluence_space_key: string | null;
+      confluence_base_url: string | null;
     }>('/api/settings'),
     update: (data: {
       gdrive_folder_id?: string;
@@ -160,6 +164,10 @@ export const api = {
       slack_token?: string;
       intelligence_system_prompt?: string;
       intelligence_context?: string;
+      confluence_email?: string;
+      confluence_api_token?: string;
+      confluence_space_key?: string;
+      confluence_base_url?: string;
     }) => apiFetch<{ ok: boolean }>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
   },
 

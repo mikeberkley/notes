@@ -2,10 +2,14 @@ import { useState, useEffect } from 'react';
 import { api, type ApiKeyRecord } from '../lib/api.js';
 
 export default function Settings() {
-  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; slack_token: string | null; intelligence_system_prompt: string | null; intelligence_context: string | null; connections: { google: boolean } } | null>(null);
+  const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; slack_token: string | null; intelligence_system_prompt: string | null; intelligence_context: string | null; connections: { google: boolean }; confluence_email: string | null; confluence_api_token: string | null; confluence_space_key: string | null; confluence_base_url: string | null } | null>(null);
   const [folderInput, setFolderInput] = useState('');
   const [workflowyKeyInput, setWorkflowyKeyInput] = useState('');
   const [slackTokenInput, setSlackTokenInput] = useState('');
+  const [confluenceEmailInput, setConfluenceEmailInput] = useState('');
+  const [confluenceTokenInput, setConfluenceTokenInput] = useState('');
+  const [confluenceSpaceKeyInput, setConfluenceSpaceKeyInput] = useState('');
+  const [confluenceBaseUrlInput, setConfluenceBaseUrlInput] = useState('');
   const [intelligenceSystemPromptInput, setIntelligenceSystemPromptInput] = useState('');
   const [intelligenceContextInput, setIntelligenceContextInput] = useState('');
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
@@ -21,6 +25,9 @@ export default function Settings() {
         setFolderInput(s.gdrive_folder_id ?? '');
         setIntelligenceSystemPromptInput(s.intelligence_system_prompt ?? '');
         setIntelligenceContextInput(s.intelligence_context ?? '');
+        setConfluenceEmailInput(s.confluence_email ?? '');
+        setConfluenceSpaceKeyInput(s.confluence_space_key ?? '');
+        setConfluenceBaseUrlInput(s.confluence_base_url ?? '');
         setKeys(k);
       })
       .catch(console.error)
@@ -54,6 +61,23 @@ export default function Settings() {
     const fresh = await api.settings.get();
     setSettings(fresh);
     setMessage('Slack token saved.');
+    setTimeout(() => setMessage(''), 2000);
+  }
+
+  async function saveConfluenceSettings() {
+    const update: Record<string, string> = {
+      confluence_email: confluenceEmailInput.trim(),
+      confluence_space_key: confluenceSpaceKeyInput.trim(),
+      confluence_base_url: confluenceBaseUrlInput.trim(),
+    };
+    if (confluenceTokenInput.trim()) {
+      update.confluence_api_token = confluenceTokenInput.trim();
+    }
+    await api.settings.update(update);
+    setConfluenceTokenInput('');
+    const fresh = await api.settings.get();
+    setSettings(fresh);
+    setMessage('Confluence settings saved.');
     setTimeout(() => setMessage(''), 2000);
   }
 
@@ -193,6 +217,49 @@ export default function Settings() {
             />
             <button
               onClick={saveSlackToken}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
+            >
+              Save
+            </button>
+          </div>
+        </section>
+
+        {/* Confluence */}
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="font-semibold text-gray-900 mb-1">Confluence</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            {settings?.confluence_api_token
+              ? 'Connected. Update any field and save to change settings.'
+              : 'Enter your Atlassian credentials to ingest pages from a Confluence space.'}
+          </p>
+          <div className="space-y-3">
+            <input
+              value={confluenceBaseUrlInput}
+              onChange={e => setConfluenceBaseUrlInput(e.target.value)}
+              placeholder="Domain — e.g. yourteam.atlassian.net"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <input
+              value={confluenceEmailInput}
+              onChange={e => setConfluenceEmailInput(e.target.value)}
+              placeholder="Atlassian account email"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <input
+              value={confluenceSpaceKeyInput}
+              onChange={e => setConfluenceSpaceKeyInput(e.target.value)}
+              placeholder="Space key — e.g. PP1"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <input
+              type="password"
+              value={confluenceTokenInput}
+              onChange={e => setConfluenceTokenInput(e.target.value)}
+              placeholder={settings?.confluence_api_token ? '••••••••  (paste new token to replace)' : 'API token from id.atlassian.com'}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={saveConfluenceSettings}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
             >
               Save
