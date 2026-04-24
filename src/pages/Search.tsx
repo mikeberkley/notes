@@ -691,10 +691,10 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask a question about your memories… (Enter to send, Shift+Enter for new line)"
-          rows={1}
+          rows={3}
           disabled={streaming}
           className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none disabled:opacity-50"
-          style={{ fontSize: '16px', minHeight: '38px', maxHeight: '120px' }}
+          style={{ fontSize: '16px', minHeight: '72px', maxHeight: '200px' }}
           onInput={e => {
             const el = e.currentTarget;
             el.style.height = 'auto';
