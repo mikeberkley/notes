@@ -392,7 +392,7 @@ export async function searchSmos(
     const params: (string | number)[] = [userId];
 
     if (layer !== undefined) { sql += ' AND layer = ?'; params.push(layer); }
-    if (fromDate) { sql += ' AND date_range_start >= ?'; params.push(fromDate); }
+    if (fromDate) { sql += ' AND date_range_end >= ?'; params.push(fromDate); }
     if (toDate) { sql += ' AND date_range_start <= ?'; params.push(toDate); }
 
     sql += ' ORDER BY date_range_start DESC LIMIT ?';
@@ -461,7 +461,7 @@ export async function searchSmos(
   `;
   const srcParams: (string | number)[] = [ftsQuery, userId];
   if (layer !== undefined) { srcSql += ' AND s.layer = ?'; srcParams.push(layer); }
-  if (fromDate) { srcSql += ' AND s.date_range_start >= ?'; srcParams.push(fromDate); }
+  if (fromDate) { srcSql += ' AND s.date_range_end >= ?'; srcParams.push(fromDate); }
   if (toDate) { srcSql += ' AND s.date_range_start <= ?'; srcParams.push(toDate); }
   srcSql += ' GROUP BY sp.smo_id, rs.id LIMIT ?';
   srcParams.push(limit);
@@ -495,7 +495,7 @@ export async function searchSmos(
   `;
   const smoParams: (string | number)[] = [ftsQuery, userId];
   if (layer !== undefined) { smoSql += ' AND f.layer = ?'; smoParams.push(layer); }
-  if (fromDate) { smoSql += ' AND s.date_range_start >= ?'; smoParams.push(fromDate); }
+  if (fromDate) { smoSql += ' AND s.date_range_end >= ?'; smoParams.push(fromDate); }
   if (toDate) { smoSql += ' AND s.date_range_start <= ?'; smoParams.push(toDate); }
   if (smoIdsFromSources.size > 0) {
     smoSql += ` AND f.smo_id NOT IN (${[...smoIdsFromSources].map(() => '?').join(',')})`;
