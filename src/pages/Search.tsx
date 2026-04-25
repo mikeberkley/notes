@@ -763,7 +763,12 @@ export default function Search() {
     setLoading(true);
     try {
       const data = await api.search(q, layer, from || undefined, to || undefined);
-      setResults(data);
+      const filtered = data.filter(r => r.layer !== 3);
+      filtered.sort((a, b) => {
+        if (b.date_range_end !== a.date_range_end) return b.date_range_end.localeCompare(a.date_range_end);
+        return b.layer - a.layer;
+      });
+      setResults(filtered);
       setResultsQuery(q);
     } catch (err) {
       console.error(err);

@@ -262,11 +262,11 @@ export async function runSmoGenerationPipeline(env: Env, date?: string): Promise
         console.log(`[smo] Layer 2 generated for user ${user.id}`);
       }
 
-      // Layer 3 — last Friday of month
-      if (isLastFridayOfMonth(targetDateObj)) {
-        await generateLayer3Smo(env, user.id, targetDate);
-        console.log(`[smo] Layer 3 generated for user ${user.id}`);
-      }
+      // Layer 3 — paused
+      // if (isLastFridayOfMonth(targetDateObj)) {
+      //   await generateLayer3Smo(env, user.id, targetDate);
+      //   console.log(`[smo] Layer 3 generated for user ${user.id}`);
+      // }
     } catch (err) {
       console.error(`[smo] User ${user.id} error:`, err);
     }
