@@ -684,7 +684,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
       )}
 
       {/* Input */}
-      <div className="px-3 py-2.5 flex gap-2 items-end">
+      <div className={`px-3 py-2.5 flex gap-2 items-end${expanded ? ' mt-auto' : ''}`}>
         <textarea
           ref={inputRef}
           value={input}
