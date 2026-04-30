@@ -718,12 +718,13 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   );
 }
 
-type Preset = 'all' | 'yesterday' | 'week' | 'digest';
+type Preset = 'all' | 'yesterday' | 'week' | 'week+digest' | 'digest';
 
 const PRESET_LABELS: Record<Preset, string> = {
   all: 'All',
   yesterday: 'Yesterday',
   week: 'This Week',
+  'week+digest': 'This Week + Digests',
   digest: 'Digest',
 };
 
@@ -733,10 +734,11 @@ function getPresetFilters(preset: Preset): { layer: number | undefined; from: st
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
   const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 6);
   switch (preset) {
-    case 'yesterday': return { layer: 1,         from: fmt(yesterday), to: fmt(yesterday) };
-    case 'week':      return { layer: undefined,  from: fmt(weekAgo),   to: fmt(today) };
-    case 'digest':    return { layer: 2,          from: '',             to: '' };
-    default:          return { layer: undefined,  from: '',             to: '' };
+    case 'yesterday':    return { layer: 1,         from: fmt(yesterday), to: fmt(yesterday) };
+    case 'week':         return { layer: undefined,  from: fmt(weekAgo),   to: fmt(today) };
+    case 'week+digest':  return { layer: undefined,  from: fmt(weekAgo),   to: fmt(today) };
+    case 'digest':       return { layer: 2,          from: '',             to: '' };
+    default:             return { layer: undefined,  from: '',             to: '' };
   }
 }
 
@@ -750,9 +752,11 @@ export default function Search() {
   const [toDate, setToDate] = useState('');
   const [loading, setLoading] = useState(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const presetRef = useRef<Preset>('all');
 
   function applyPreset(p: Preset) {
     const f = getPresetFilters(p);
+    presetRef.current = p;
     setPreset(p);
     setLayerFilter(f.layer);
     setFromDate(f.from);
@@ -762,7 +766,20 @@ export default function Search() {
   const fetchResults = useCallback(async (q: string, layer: number | undefined, from: string, to: string) => {
     setLoading(true);
     try {
-      const data = await api.search(q, layer, from || undefined, to || undefined);
+      let data: SearchResult[];
+      if (presetRef.current === 'week+digest') {
+        const [weekData, digestData] = await Promise.all([
+          api.search(q, 1, from || undefined, to || undefined),
+          api.search(q, 2, undefined, undefined),
+        ]);
+        const seen = new Set<string>();
+        data = [];
+        for (const r of [...weekData, ...digestData]) {
+          if (!seen.has(r.smo_id)) { seen.add(r.smo_id); data.push(r); }
+        }
+      } else {
+        data = await api.search(q, layer, from || undefined, to || undefined);
+      }
       const filtered = data.filter(r => r.layer !== 3);
       filtered.sort((a, b) => {
         if (b.date_range_end !== a.date_range_end) return b.date_range_end.localeCompare(a.date_range_end);
