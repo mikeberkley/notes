@@ -718,14 +718,13 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   );
 }
 
-type Preset = 'all' | 'yesterday' | 'week' | 'week+digest' | 'digest';
+type Preset = 'all' | 'yesterday' | 'week+digest' | 'digest';
 
 const PRESET_LABELS: Record<Preset, string> = {
   all: 'All',
   yesterday: 'Yesterday',
-  week: 'This Week',
   'week+digest': 'This Week + Digests',
-  digest: 'Digest',
+  digest: 'Digests',
 };
 
 function getPresetFilters(preset: Preset): { layer: number | undefined; from: string; to: string } {
@@ -735,7 +734,6 @@ function getPresetFilters(preset: Preset): { layer: number | undefined; from: st
   const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 6);
   switch (preset) {
     case 'yesterday':    return { layer: 1,         from: fmt(yesterday), to: fmt(yesterday) };
-    case 'week':         return { layer: undefined,  from: fmt(weekAgo),   to: fmt(today) };
     case 'week+digest':  return { layer: undefined,  from: fmt(weekAgo),   to: fmt(today) };
     case 'digest':       return { layer: 2,          from: '',             to: '' };
     default:             return { layer: undefined,  from: '',             to: '' };
