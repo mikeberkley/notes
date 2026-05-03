@@ -122,6 +122,7 @@ async function listFilesRecursive(
 
   for (const item of items) {
     if (item.mimeType === 'application/vnd.google-apps.folder') {
+      if (item.name.toLowerCase() === 'invoices') continue;
       // Recurse into sub-folder (no modifiedTime filter here — a sub-folder's
       // modifiedTime may not update when a child file is edited)
       const subPath = folderPath ? `${folderPath}/${item.name}` : item.name;
@@ -160,6 +161,7 @@ async function listSharedWithMeFiles(
 
   for (const item of items) {
     if (item.mimeType === 'application/vnd.google-apps.folder') {
+      if (item.name.toLowerCase() === 'invoices') continue;
       // Children of a shared folder don't carry sharedWithMe=true, so recurse normally
       const children = await listFilesRecursive(item.id, modifiedAfter, accessToken, item.name);
       results.push(...children);
