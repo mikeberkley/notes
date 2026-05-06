@@ -617,7 +617,7 @@ export async function getSmosForIntelligence(
     if (layer !== undefined) { sql += ' AND layer = ?'; params.push(layer); }
     if (fromDate) { sql += ' AND date_range_start >= ?'; params.push(fromDate); }
     if (toDate) { sql += ' AND date_range_start <= ?'; params.push(toDate); }
-    sql += ' ORDER BY layer DESC, date_range_start DESC LIMIT 500';
+    sql += ' ORDER BY layer DESC, date_range_start ASC LIMIT 500';
     const { results } = await db.prepare(sql).bind(...params).all<Smo>();
     return results;
   }
@@ -668,7 +668,7 @@ async function fetchSmosByIds(db: D1Database, userId: string, ids: string[]): Pr
     const chunk = ids.slice(i, i + CHUNK);
     const placeholders = chunk.map(() => '?').join(',');
     const { results: rows } = await db.prepare(
-      `SELECT * FROM smos WHERE user_id = ? AND id IN (${placeholders}) ORDER BY layer DESC, date_range_start DESC`
+      `SELECT * FROM smos WHERE user_id = ? AND id IN (${placeholders}) ORDER BY layer DESC, date_range_start ASC`
     ).bind(userId, ...chunk).all<Smo>();
     results.push(...rows);
   }

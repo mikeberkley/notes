@@ -174,7 +174,7 @@ export function buildIntelligenceSystemPrompt(
     prompt += `\n\nADDITIONAL CONTEXT (always loaded):\n${alwaysContext.trim()}`;
   }
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/New_York' });
-  prompt += `\n\nToday's date is ${today}.`;
+  prompt += `\n\nToday's date is ${today}. Memories are presented oldest to newest — when facts conflict or recency is relevant, prefer the more recent memory.`;
   return prompt;
 }
 

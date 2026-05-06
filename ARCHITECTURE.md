@@ -627,7 +627,7 @@ Fallback: if a source's summarization failed, its raw content is truncated to 4,
 ### Intelligence query prompt
 The intelligence layer uses a multi-message conversation structure:
 ```
-[system]    User's custom system prompt (or default) + always-loaded context block + "Today's date is <weekday, month day, year>." (America/New_York)
+[system]    User's custom system prompt (or default) + always-loaded context block + "Today's date is <weekday, month day, year>." (America/New_York) + recency instruction ("memories are presented oldest to newest — prefer more recent when facts conflict")
 [user]      MEMORY CONTEXT block (assembled SMOs + source summaries — see §21)
 [assistant] "I have reviewed your memory context and am ready to answer questions about it."
 [user/asst] …prior conversation history turns…
@@ -920,7 +920,7 @@ Keywords: …
   [Workflowy: Product roadmap] Summary text | …
 ```
 
-**Ordering:** Layer 3 → Layer 2 → Layer 1, newest-first within each layer. Source summaries are only included for Layer 1 SMOs (higher layers already synthesize them). Budget truncates from the bottom — least-recently-dated Layer 1 SMOs drop first.
+**Ordering:** Layer 3 → Layer 2 → Layer 1, oldest-first within each layer. Newer memories appear closer to the question in the context window, giving the LLM a natural positional recency bias. The system prompt also instructs the model to prefer more recent memories when facts conflict. Source summaries are only included for Layer 1 SMOs (higher layers already synthesize them). Budget truncates from the bottom — most-recently-dated Layer 1 SMOs drop last.
 
 ### Context token budget
 
