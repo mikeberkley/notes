@@ -6,7 +6,8 @@ const CHAT_MODELS = [
   { id: 'anthropic/claude-haiku-4-5-20251001',  label: 'Claude Haiku 4.5',  cost: '~$0.80/1M' },
   { id: 'openai/gpt-4o',                        label: 'GPT-4o',            cost: '~$2.50/1M' },
   { id: 'anthropic/claude-sonnet-4-6',          label: 'Claude Sonnet 4.6', cost: '~$3/1M' },
-  { id: 'openai/o4-mini',                       label: 'o4-mini',           cost: '~$3/1M' },
+  { id: 'google/gemini-2.5-pro',                label: 'Gemini 2.5 Pro',    cost: '~$7/1M' },
+  { id: 'openai/gpt-5.5',                       label: 'GPT-5.5',           cost: '~$15/1M' },
   { id: 'anthropic/claude-opus-4-7',            label: 'Claude Opus 4.7',   cost: '~$15/1M' },
 ] as const;
 
