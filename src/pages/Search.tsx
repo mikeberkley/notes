@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type SearchResult, type SmoDetail, type SourceSummaryItem, type ChatMessage, type ContextMeta } from '../lib/api.js';
 
 const CHAT_MODELS = [
-  { id: 'moonshotai/kimi-k2.6',         label: 'Kimi K2.6'         },
-  { id: 'google/gemini-2.5-flash',      label: 'Gemini 2.5 Flash'  },
-  { id: 'anthropic/claude-sonnet-4-6',  label: 'Claude Sonnet 4.6' },
-  { id: 'openai/gpt-5.5',               label: 'GPT-5.5'           },
+  { id: 'google/gemini-2.5-flash',      label: 'Gemini 2.5 Flash',  cost: '$0.30 / $2.50'   },
+  { id: 'moonshotai/kimi-k2.6',         label: 'Kimi K2.6',         cost: '$0.68 / $3.00'   },
+  { id: 'anthropic/claude-sonnet-4-6',  label: 'Claude Sonnet 4.6', cost: '$3.00 / $15.00'  },
+  { id: 'openai/gpt-5.5',               label: 'GPT-5.5',           cost: '$5.00 / $30.00'  },
 ] as const;
 
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6';
@@ -744,7 +744,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
           >
             {CHAT_MODELS.map(m => (
               <option key={m.id} value={m.id}>
-                {m.label}
+                {m.label} — {m.cost}
               </option>
             ))}
           </select>
