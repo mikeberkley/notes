@@ -741,7 +741,7 @@ const PRESET_LABELS: Record<Preset, string> = {
 };
 
 function getPresetFilters(preset: Preset): { layer: number | undefined; from: string; to: string } {
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const today = new Date();
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
   const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 6);
