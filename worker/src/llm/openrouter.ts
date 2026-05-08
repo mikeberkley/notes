@@ -98,8 +98,9 @@ export async function callLLMWithPDF(
 export async function* streamChatCompletion(
   env: Env,
   messages: Array<{ role: string; content: string }>,
+  model?: string,
 ): AsyncGenerator<string> {
-  const model = env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4-6';
+  const resolvedModel = model ?? env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4-6';
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
@@ -114,7 +115,7 @@ export async function* streamChatCompletion(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model,
+        model: resolvedModel,
         messages,
         temperature: 0.5,
         stream: true,

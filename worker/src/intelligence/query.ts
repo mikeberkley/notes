@@ -20,6 +20,7 @@ export async function handleIntelligenceQuery(
     history: Array<{ role: 'user' | 'assistant'; content: string }>;
     filters: IntelligenceFilters;
     includeRawContent?: boolean;
+    model?: string;
   };
 
   try {
@@ -28,7 +29,7 @@ export async function handleIntelligenceQuery(
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
   }
 
-  const { question, history = [], filters = { q: '' }, includeRawContent = false } = body;
+  const { question, history = [], filters = { q: '' }, includeRawContent = false, model } = body;
   if (!question?.trim()) {
     return new Response(JSON.stringify({ error: 'question is required' }), { status: 400, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
   }
@@ -62,7 +63,7 @@ export async function handleIntelligenceQuery(
       await writer.write(encoder.encode(metaEvent));
 
       // Stream LLM response
-      for await (const text of streamChatCompletion(env, messages)) {
+      for await (const text of streamChatCompletion(env, messages, model)) {
         const chunkEvent = `event: chunk\ndata: ${JSON.stringify({ text })}\n\n`;
         await writer.write(encoder.encode(chunkEvent));
       }

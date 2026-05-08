@@ -1,6 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type SearchResult, type SmoDetail, type SourceSummaryItem, type ChatMessage, type ContextMeta } from '../lib/api.js';
 
+const CHAT_MODELS = [
+  { id: 'openai/gpt-4o-mini',                  label: 'GPT-4o Mini',       cost: '~$0.15/1M' },
+  { id: 'anthropic/claude-haiku-4-5-20251001',  label: 'Claude Haiku 4.5',  cost: '~$0.80/1M' },
+  { id: 'openai/gpt-4o',                        label: 'GPT-4o',            cost: '~$2.50/1M' },
+  { id: 'anthropic/claude-sonnet-4-6',          label: 'Claude Sonnet 4.6', cost: '~$3/1M' },
+  { id: 'openai/o4-mini',                       label: 'o4-mini',           cost: '~$3/1M' },
+  { id: 'anthropic/claude-opus-4-7',            label: 'Claude Opus 4.7',   cost: '~$15/1M' },
+] as const;
+
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6';
+
 const LAYER_LABELS: Record<number, string> = { 1: 'Day', 2: 'Week', 3: 'Month' };
 const LAYER_COLORS: Record<number, string> = {
   1: 'bg-blue-100 text-blue-700',
@@ -495,7 +506,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
     let accumulated = '';
     try {
       await api.intelligence.query(
-        { question, history, filters: { q: filters.q, layer: filters.layer, from: filters.from || undefined, to: filters.to || undefined }, includeRawContent },
+        { question, history, filters: { q: filters.q, layer: filters.layer, from: filters.from || undefined, to: filters.to || undefined }, includeRawContent, model: selectedModel },
         {
           onMeta: (meta) => setContextMeta(meta),
           onChunk: (text) => { accumulated += text; setStreamingContent(accumulated); },
@@ -561,6 +572,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
   const [expanded, setExpanded] = useState(false);
   const [historyCopied, setHistoryCopied] = useState(false);
   const [includeRawContent, setIncludeRawContent] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const hasContent = history.length > 0 || streaming;
 
   async function copyHistory() {
@@ -715,16 +727,30 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
             {streaming ? 'Stop' : 'Ask'}
           </button>
         </div>
-        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none w-fit">
-          <input
-            type="checkbox"
-            checked={includeRawContent}
-            onChange={e => setIncludeRawContent(e.target.checked)}
+        <div className="flex items-center justify-between gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeRawContent}
+              onChange={e => setIncludeRawContent(e.target.checked)}
+              disabled={streaming}
+              className="accent-indigo-600 disabled:opacity-50"
+            />
+            Include raw content (Workflowy + Drive, 2 most recent)
+          </label>
+          <select
+            value={selectedModel}
+            onChange={e => setSelectedModel(e.target.value)}
             disabled={streaming}
-            className="accent-indigo-600 disabled:opacity-50"
-          />
-          Include raw content (Workflowy + Drive, 2 most recent)
-        </label>
+            className="text-xs text-gray-400 bg-transparent border-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 rounded disabled:opacity-50"
+          >
+            {CHAT_MODELS.map(m => (
+              <option key={m.id} value={m.id}>
+                {m.label} — {m.cost}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
     </div>
     </>
