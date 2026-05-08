@@ -2,13 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type SearchResult, type SmoDetail, type SourceSummaryItem, type ChatMessage, type ContextMeta } from '../lib/api.js';
 
 const CHAT_MODELS = [
-  { id: 'openai/gpt-4o-mini',                  label: 'GPT-4o Mini',       cost: '~$0.15/1M' },
-  { id: 'anthropic/claude-haiku-4-5-20251001',  label: 'Claude Haiku 4.5',  cost: '~$0.80/1M' },
-  { id: 'openai/gpt-4o',                        label: 'GPT-4o',            cost: '~$2.50/1M' },
-  { id: 'anthropic/claude-sonnet-4-6',          label: 'Claude Sonnet 4.6', cost: '~$3/1M' },
-  { id: 'google/gemini-2.5-pro',                label: 'Gemini 2.5 Pro',    cost: '~$7/1M' },
-  { id: 'openai/gpt-5.5',                       label: 'GPT-5.5',           cost: '~$15/1M' },
-  { id: 'anthropic/claude-opus-4-7',            label: 'Claude Opus 4.7',   cost: '~$15/1M' },
+  { id: 'moonshotai/kimi-k2.6',         label: 'Kimi K2.6'         },
+  { id: 'google/gemini-2.5-flash',      label: 'Gemini 2.5 Flash'  },
+  { id: 'anthropic/claude-sonnet-4-6',  label: 'Claude Sonnet 4.6' },
+  { id: 'openai/gpt-5.5',               label: 'GPT-5.5'           },
 ] as const;
 
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6';
@@ -747,7 +744,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
           >
             {CHAT_MODELS.map(m => (
               <option key={m.id} value={m.id}>
-                {m.label} — {m.cost}
+                {m.label}
               </option>
             ))}
           </select>
