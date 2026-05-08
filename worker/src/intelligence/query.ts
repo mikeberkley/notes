@@ -19,6 +19,7 @@ export async function handleIntelligenceQuery(
     question: string;
     history: Array<{ role: 'user' | 'assistant'; content: string }>;
     filters: IntelligenceFilters;
+    includeRawContent?: boolean;
   };
 
   try {
@@ -27,7 +28,7 @@ export async function handleIntelligenceQuery(
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
   }
 
-  const { question, history = [], filters = { q: '' } } = body;
+  const { question, history = [], filters = { q: '' }, includeRawContent = false } = body;
   if (!question?.trim()) {
     return new Response(JSON.stringify({ error: 'question is required' }), { status: 400, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } });
   }
@@ -36,7 +37,7 @@ export async function handleIntelligenceQuery(
   const [systemPromptConfig, alwaysContextConfig, { contextBlock, meta }] = await Promise.all([
     getConfig(env.DB, userId, 'intelligence_system_prompt'),
     getConfig(env.DB, userId, 'intelligence_context'),
-    assembleIntelligenceContext(env.DB, userId, filters),
+    assembleIntelligenceContext(env.DB, userId, filters, includeRawContent),
   ]);
 
   const systemPrompt = buildIntelligenceSystemPrompt(systemPromptConfig, alwaysContextConfig);

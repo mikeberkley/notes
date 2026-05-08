@@ -495,7 +495,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
     let accumulated = '';
     try {
       await api.intelligence.query(
-        { question, history, filters: { q: filters.q, layer: filters.layer, from: filters.from || undefined, to: filters.to || undefined } },
+        { question, history, filters: { q: filters.q, layer: filters.layer, from: filters.from || undefined, to: filters.to || undefined }, includeRawContent },
         {
           onMeta: (meta) => setContextMeta(meta),
           onChunk: (text) => { accumulated += text; setStreamingContent(accumulated); },
@@ -560,6 +560,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
 
   const [expanded, setExpanded] = useState(false);
   const [historyCopied, setHistoryCopied] = useState(false);
+  const [includeRawContent, setIncludeRawContent] = useState(false);
   const hasContent = history.length > 0 || streaming;
 
   async function copyHistory() {
@@ -684,34 +685,46 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
       )}
 
       {/* Input */}
-      <div className={`px-3 py-2.5 flex gap-2 items-end${expanded ? ' mt-auto' : ''}`}>
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask a question about your memories… (Enter to send, Shift+Enter for new line)"
-          rows={3}
-          disabled={streaming}
-          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none disabled:opacity-50"
-          style={{ fontSize: '16px', minHeight: '72px', maxHeight: '200px' }}
-          onInput={e => {
-            const el = e.currentTarget;
-            el.style.height = 'auto';
-            el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-          }}
-        />
-        <button
-          onClick={streaming ? () => abortRef.current?.abort() : send}
-          disabled={!streaming && !input.trim()}
-          className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-            streaming
-              ? 'bg-red-100 text-red-600 hover:bg-red-200'
-              : 'bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed'
-          }`}
-        >
-          {streaming ? 'Stop' : 'Ask'}
-        </button>
+      <div className={`px-3 pt-2.5 pb-1.5 flex flex-col gap-1.5${expanded ? ' mt-auto' : ''}`}>
+        <div className="flex gap-2 items-end">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask a question about your memories… (Enter to send, Shift+Enter for new line)"
+            rows={3}
+            disabled={streaming}
+            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none disabled:opacity-50"
+            style={{ fontSize: '16px', minHeight: '72px', maxHeight: '200px' }}
+            onInput={e => {
+              const el = e.currentTarget;
+              el.style.height = 'auto';
+              el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+            }}
+          />
+          <button
+            onClick={streaming ? () => abortRef.current?.abort() : send}
+            disabled={!streaming && !input.trim()}
+            className={`shrink-0 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              streaming
+                ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+          >
+            {streaming ? 'Stop' : 'Ask'}
+          </button>
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none w-fit">
+          <input
+            type="checkbox"
+            checked={includeRawContent}
+            onChange={e => setIncludeRawContent(e.target.checked)}
+            disabled={streaming}
+            className="accent-indigo-600 disabled:opacity-50"
+          />
+          Include raw content (Workflowy + Drive, 2 most recent)
+        </label>
       </div>
     </div>
     </>

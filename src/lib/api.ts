@@ -196,7 +196,7 @@ export const api = {
 
   intelligence: {
     query: async (
-      payload: { question: string; history: ChatMessage[]; filters: IntelligenceFilters },
+      payload: { question: string; history: ChatMessage[]; filters: IntelligenceFilters; includeRawContent?: boolean },
       callbacks: {
         onMeta: (meta: ContextMeta) => void;
         onChunk: (text: string) => void;

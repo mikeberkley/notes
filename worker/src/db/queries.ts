@@ -723,6 +723,31 @@ export async function getSourceSummariesForSmos(
   return map;
 }
 
+export async function getRawContentForSmos(
+  db: D1Database,
+  userId: string,
+  smoIds: string[],
+): Promise<Map<string, Array<{ source_id: string; source_type: string; content: string; metadata: string }>>> {
+  const map = new Map<string, Array<{ source_id: string; source_type: string; content: string; metadata: string }>>();
+  if (smoIds.length === 0) return map;
+  const placeholders = smoIds.map(() => '?').join(',');
+  const { results } = await db.prepare(`
+    SELECT sp.smo_id, rs.id as source_id, rs.source_type, rs.content, rs.metadata
+    FROM source_pointers sp
+    JOIN raw_sources rs ON rs.id = sp.target_id AND sp.target_type = 'raw_source'
+    WHERE sp.smo_id IN (${placeholders}) AND rs.user_id = ?
+      AND rs.source_type IN ('workflowy', 'gdrive')
+      AND rs.summarized_at IS NOT NULL
+    ORDER BY rs.source_date DESC
+  `).bind(...smoIds, userId).all<{ smo_id: string; source_id: string; source_type: string; content: string; metadata: string }>();
+  for (const r of results) {
+    const arr = map.get(r.smo_id) ?? [];
+    arr.push({ source_id: r.source_id, source_type: r.source_type, content: r.content, metadata: r.metadata });
+    map.set(r.smo_id, arr);
+  }
+  return map;
+}
+
 export async function getAllUsersWithTokens(db: D1Database): Promise<User[]> {
   const { results } = await db.prepare(`
     SELECT u.* FROM users u

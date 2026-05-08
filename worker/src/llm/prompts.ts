@@ -194,7 +194,8 @@ export function buildIntelligenceContextBlock(
     date_range_end: string;
   }>,
   themesMap: Map<string, Array<{ headline: string; summary: string }>>,
-  sourcesMap: Map<string, Array<{ source_type: string; metadata: string; summary: string | null; key_decisions: string | null; key_entities: string | null; keywords: string | null }>>,
+  sourcesMap: Map<string, Array<{ id: string; source_type: string; metadata: string; summary: string | null; key_decisions: string | null; key_entities: string | null; keywords: string | null }>>,
+  rawContentMap: Map<string, Array<{ source_id: string; source_type: string; content: string; metadata: string }>> = new Map(),
 ): { block: string; smoCount: number; sourceCount: number; charCount: number } {
   const LAYER_LABEL: Record<number, string> = { 1: 'DAILY', 2: 'WEEKLY', 3: 'MONTHLY' };
 
@@ -236,6 +237,9 @@ export function buildIntelligenceContextBlock(
     // Include source summaries for Layer 1 only (higher layers already synthesize them)
     if (smo.layer === 1) {
       const sources = sourcesMap.get(smo.id) ?? [];
+      const rawSources = rawContentMap.get(smo.id) ?? [];
+      const rawBySourceId = new Map(rawSources.map(r => [r.source_id, r.content]));
+
       for (const src of sources) {
         const meta = JSON.parse(src.metadata) as Record<string, unknown>;
         let srcLabel: string;
@@ -258,7 +262,14 @@ export function buildIntelligenceContextBlock(
           const kw = JSON.parse(src.keywords) as string[];
           if (kw.length) srcParts.push(`Keywords: ${kw.join(', ')}`);
         }
-        lines.push(srcParts.join(' | '));
+
+        const rawContent = rawBySourceId.get(src.id);
+        if (rawContent) {
+          lines.push(srcParts.join(' | '));
+          lines.push(`  [RAW CONTENT]\n${rawContent}\n  [END RAW CONTENT]`);
+        } else {
+          lines.push(srcParts.join(' | '));
+        }
         sourceCount++;
       }
     }

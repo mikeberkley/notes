@@ -3,6 +3,7 @@ import {
   getSmosForIntelligence,
   getThemesForSmos,
   getSourceSummariesForSmos,
+  getRawContentForSmos,
 } from '../db/queries.js';
 import { buildIntelligenceContextBlock } from '../llm/prompts.js';
 
@@ -23,6 +24,7 @@ export async function assembleIntelligenceContext(
   db: D1Database,
   userId: string,
   filters: IntelligenceFilters,
+  includeRawContent = false,
 ): Promise<{ contextBlock: string; meta: ContextMeta }> {
   const smos = await getSmosForIntelligence(db, userId, filters.q, filters.layer, filters.from, filters.to);
 
@@ -34,15 +36,26 @@ export async function assembleIntelligenceContext(
   }
 
   const smoIds = smos.map(s => s.id);
-  const [themesMap, sourcesMap] = await Promise.all([
+
+  // Identify the 2 most recent SMOs by date for raw content injection
+  const recentSmoIds = includeRawContent
+    ? [...smos]
+        .sort((a, b) => b.date_range_start.localeCompare(a.date_range_start))
+        .slice(0, 2)
+        .map(s => s.id)
+    : [];
+
+  const [themesMap, sourcesMap, rawContentMap] = await Promise.all([
     getThemesForSmos(db, smoIds),
     getSourceSummariesForSmos(db, userId, smoIds),
+    recentSmoIds.length > 0 ? getRawContentForSmos(db, userId, recentSmoIds) : Promise.resolve(new Map()),
   ]);
 
   const { block, smoCount, sourceCount, charCount } = buildIntelligenceContextBlock(
     smos,
     themesMap,
     sourcesMap,
+    rawContentMap,
   );
 
   return {
