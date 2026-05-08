@@ -1,8 +1,8 @@
 # Notes App — Architecture & Implementation Reference
 
-**Last updated:** 2026-04-24  
+**Last updated:** 2026-05-07  
 **Status:** Built and deployed ✅  
-**Latest addition:** Confluence ingestion (delta sync of Confluence Cloud pages into the nightly pipeline)
+**Latest addition:** Raw content toggle in ASK panel — optionally injects full Workflowy + Drive content for the 2 most recent SMOs
 
 ---
 
@@ -331,7 +331,8 @@ Settings
 
 Intelligence
   POST /api/intelligence/query
-       Body: { question, history: [{role, content}], filters: {q, layer, from, to} }
+       Body: { question, history: [{role, content}], filters: {q, layer, from, to},
+               includeRawContent?: boolean }
        Response: text/event-stream SSE
          event: meta  → { smo_count, source_count, token_estimate }  (sent first)
          event: chunk → { text }  (streamed answer fragments)
@@ -339,6 +340,9 @@ Intelligence
          event: error → { message }
        Assembles context from filtered SMOs + source summaries (see §21), then calls
        OpenRouter with full conversation history for multi-turn support.
+       If includeRawContent=true, the 2 most recent SMOs (by date_range_start) also
+       include the full raw content of their Workflowy and Drive sources, appended
+       after each source's summary block.
 
 Admin / Debug
   POST /api/admin/ingest/trigger             → manually trigger ingestion
@@ -725,6 +729,9 @@ Layer check logic is in `worker/src/cron/scheduler.ts` — a single `scheduled()
   Header buttons: **Save session** (persists to D1 as a chat source), **Copy all** (copies full
   conversation to clipboard as rendered HTML), **Clear**, and an **expand/collapse** toggle that
   overlays the panel as a full-viewport modal with a dimmed backdrop.
+  Below the text input, a checkbox — **Include raw content (Workflowy + Drive, 2 most recent)** —
+  injects the full raw content for those source types on the 2 most recently-dated SMOs in
+  the current filtered set (augments existing summaries; does not replace them).
 
 ### SMO Detail (`/smo/:id`)
 - Full SMO: headline, summary, themes, keywords, key entities, key decisions (green), open questions (amber bullets)
@@ -893,6 +900,7 @@ A multi-turn question-answering system embedded in the Search page. The user ask
    - Re-runs the same DB query as the search page to get matching SMOs
    - Fetches themes for all matching SMOs in one batched query
    - Fetches source summaries (LLM-generated fields only, no raw content) for all matching SMOs via `source_pointers → raw_sources`
+   - If `includeRawContent=true`: identifies the 2 most recent SMOs (by `date_range_start` DESC), fetches their Workflowy and Drive raw content from `raw_sources`, and includes it in the context block after each source's summary
    - Builds a structured context block (see below) up to a **400K char / ~100K token budget**
 3. **LLM call** — streams from OpenRouter with `stream: true`; full conversation history is included on every turn for multi-turn coherence
 4. **SSE response** — Worker writes `event: meta` (context stats) first, then `event: chunk` fragments, then `event: done`
@@ -918,7 +926,13 @@ Keywords: …
   [Gmail: Re: Budget approval] Summary text | Decisions: … | Keywords: …
   [Drive: Q1 Review.docx] Summary text | …
   [Workflowy: Product roadmap] Summary text | …
+  [RAW CONTENT]
+  - Node text
+    - Child node
+  [END RAW CONTENT]
 ```
+
+When `includeRawContent` is enabled, the 2 most recently-dated SMOs (by `date_range_start`) have their Workflowy and Drive sources augmented with a `[RAW CONTENT]…[END RAW CONTENT]` block immediately after the source's summary line. Gmail, Slack, and other source types are not affected.
 
 **Ordering:** Layer 3 → Layer 2 → Layer 1, oldest-first within each layer. Newer memories appear closer to the question in the context window, giving the LLM a natural positional recency bias. The system prompt also instructs the model to prefer more recent memories when facts conflict. Source summaries are only included for Layer 1 SMOs (higher layers already synthesize them). Budget truncates from the bottom — most-recently-dated Layer 1 SMOs drop last.
 
@@ -951,7 +965,7 @@ All prior turns are sent with every request — the model has full context for f
 | `worker/src/intelligence/query.ts` | SSE streaming route handler |
 | `worker/src/llm/openrouter.ts` | `streamChatCompletion()` async generator |
 | `worker/src/llm/prompts.ts` | `buildIntelligenceSystemPrompt()`, `buildIntelligenceContextBlock()` |
-| `worker/src/db/queries.ts` | `getSmosForIntelligence()`, `getThemesForSmos()`, `getSourceSummariesForSmos()` |
+| `worker/src/db/queries.ts` | `getSmosForIntelligence()`, `getThemesForSmos()`, `getSourceSummariesForSmos()`, `getRawContentForSmos()` |
 | `src/pages/Search.tsx` | `IntelligencePanel` React component |
 | `src/lib/api.ts` | `api.intelligence.query()` SSE streaming client |
 
