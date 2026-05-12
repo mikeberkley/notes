@@ -235,10 +235,14 @@ export function buildIntelligenceContextBlock(
     if (keywords.length > 0) lines.push(`Keywords: ${keywords.join(', ')}`);
 
     // Include source summaries for Layer 1 only (higher layers already synthesize them)
+    let smoSourceCount = 0;
     if (smo.layer === 1) {
       const sources = sourcesMap.get(smo.id) ?? [];
       const rawSources = rawContentMap.get(smo.id) ?? [];
       const rawBySourceId = new Map(rawSources.map(r => [r.source_id, r.content]));
+
+      // Estimate chars used so far by fixed SMO lines
+      let smoCharsSoFar = lines.join('\n').length + 2; // +2 for trailing \n\n
 
       for (const src of sources) {
         const meta = JSON.parse(src.metadata) as Record<string, unknown>;
@@ -263,14 +267,25 @@ export function buildIntelligenceContextBlock(
           if (kw.length) srcParts.push(`Keywords: ${kw.join(', ')}`);
         }
 
+        const srcLine = srcParts.join(' | ');
         const rawContent = rawBySourceId.get(src.id);
-        if (rawContent) {
-          lines.push(srcParts.join(' | '));
-          lines.push(`  [RAW CONTENT]\n${rawContent}\n  [END RAW CONTENT]`);
+        const rawBlock = rawContent ? `  [RAW CONTENT]\n${rawContent}\n  [END RAW CONTENT]` : null;
+
+        const withRawLen = srcLine.length + 1 + (rawBlock ? rawBlock.length + 1 : 0);
+        const withoutRawLen = srcLine.length + 1;
+
+        if (charCount + smoCharsSoFar + withRawLen <= CHAR_BUDGET) {
+          lines.push(srcLine);
+          if (rawBlock) lines.push(rawBlock);
+          smoCharsSoFar += withRawLen;
+        } else if (charCount + smoCharsSoFar + withoutRawLen <= CHAR_BUDGET) {
+          // Include summary but skip raw content — budget is tight
+          lines.push(srcLine);
+          smoCharsSoFar += withoutRawLen;
         } else {
-          lines.push(srcParts.join(' | '));
+          break; // No room for more sources
         }
-        sourceCount++;
+        smoSourceCount++;
       }
     }
 
@@ -280,6 +295,7 @@ export function buildIntelligenceContextBlock(
     block += entry;
     charCount += entry.length;
     smoCount++;
+    sourceCount += smoSourceCount;
   }
 
   const header = `MEMORY CONTEXT: ${smoCount} memories, ${sourceCount} sources\n\n`;
