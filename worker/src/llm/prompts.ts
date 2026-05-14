@@ -266,12 +266,12 @@ export function buildIntelligenceContextBlock(
 
         const rawContent = rawBySourceId.get(src.id);
         if (rawContent) {
+          const truncatedRaw = rawContent.length > 5000 ? rawContent.slice(0, 5000) + '\n[truncated]' : rawContent;
           lines.push(srcParts.join(' | '));
-          lines.push(`  [RAW CONTENT]\n${rawContent}\n  [END RAW CONTENT]`);
+          lines.push(`  [RAW CONTENT]\n${truncatedRaw}\n  [END RAW CONTENT]`);
         } else {
           lines.push(srcParts.join(' | '));
         }
-        sourceCount++;
       }
     }
 
@@ -281,6 +281,7 @@ export function buildIntelligenceContextBlock(
     block += entry;
     charCount += entry.length;
     smoCount++;
+    if (smo.layer === 1) sourceCount += (sourcesMap.get(smo.id) ?? []).length;
   }
 
   const header = `MEMORY CONTEXT: ${smoCount} memories, ${sourceCount} sources\n\n`;
