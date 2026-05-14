@@ -264,7 +264,8 @@ export function buildIntelligenceContextBlock(
           if (kw.length) srcParts.push(`Keywords: ${kw.join(', ')}`);
         }
 
-        const rawContent = src.source_type !== 'confluence' ? rawBySourceId.get(src.id) : undefined;
+        const isSharedWithMe = src.source_type === 'gdrive' && (meta.folder_path as string | undefined) === 'Shared with me';
+        const rawContent = src.source_type !== 'confluence' && !isSharedWithMe ? rawBySourceId.get(src.id) : undefined;
         if (rawContent) {
           lines.push(srcParts.join(' | '));
           lines.push(`  [RAW CONTENT]\n${rawContent}\n  [END RAW CONTENT]`);
