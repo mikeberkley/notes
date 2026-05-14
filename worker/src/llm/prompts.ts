@@ -236,6 +236,7 @@ export function buildIntelligenceContextBlock(
     if (keywords.length > 0) lines.push(`Keywords: ${keywords.join(', ')}`);
 
     // Include source summaries for Layer 1 only (higher layers already synthesize them)
+    const linesNoRaw = [...lines];
     if (smo.layer === 1) {
       const sources = sourcesMap.get(smo.id) ?? [];
       const rawSources = rawContentMap.get(smo.id) ?? [];
@@ -264,22 +265,34 @@ export function buildIntelligenceContextBlock(
           if (kw.length) srcParts.push(`Keywords: ${kw.join(', ')}`);
         }
 
+        const srcLine = srcParts.join(' | ');
+        linesNoRaw.push(srcLine);
+
         const isSharedWithMe = src.source_type === 'gdrive' && (meta.folder_path as string | undefined) === 'Shared with me';
         const rawContent = src.source_type !== 'confluence' && !isSharedWithMe ? rawBySourceId.get(src.id) : undefined;
         if (rawContent) {
-          lines.push(srcParts.join(' | '));
+          lines.push(srcLine);
           lines.push(`  [RAW CONTENT]\n${rawContent}\n  [END RAW CONTENT]`);
         } else {
-          lines.push(srcParts.join(' | '));
+          lines.push(srcLine);
         }
       }
     }
 
     const entry = lines.join('\n') + '\n\n';
+    const entryNoRaw = linesNoRaw.join('\n') + '\n\n';
 
-    if (charCount + entry.length > CHAR_BUDGET) break;
-    block += entry;
-    charCount += entry.length;
+    // If the full entry (with raw content) doesn't fit, fall back to the summary-only version
+    // before giving up, so a single large-raw-content SMO doesn't block all subsequent ones.
+    if (charCount + entry.length <= CHAR_BUDGET) {
+      block += entry;
+      charCount += entry.length;
+    } else if (charCount + entryNoRaw.length <= CHAR_BUDGET) {
+      block += entryNoRaw;
+      charCount += entryNoRaw.length;
+    } else {
+      break;
+    }
     smoCount++;
     if (smo.layer === 1) sourceCount += (sourcesMap.get(smo.id) ?? []).length;
   }
