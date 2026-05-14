@@ -264,11 +264,10 @@ export function buildIntelligenceContextBlock(
           if (kw.length) srcParts.push(`Keywords: ${kw.join(', ')}`);
         }
 
-        const rawContent = rawBySourceId.get(src.id);
+        const rawContent = src.source_type !== 'confluence' ? rawBySourceId.get(src.id) : undefined;
         if (rawContent) {
-          const truncatedRaw = rawContent.length > 5000 ? rawContent.slice(0, 5000) + '\n[truncated]' : rawContent;
           lines.push(srcParts.join(' | '));
-          lines.push(`  [RAW CONTENT]\n${truncatedRaw}\n  [END RAW CONTENT]`);
+          lines.push(`  [RAW CONTENT]\n${rawContent}\n  [END RAW CONTENT]`);
         } else {
           lines.push(srcParts.join(' | '));
         }
