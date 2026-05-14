@@ -204,7 +204,8 @@ export function buildIntelligenceContextBlock(
   let smoCount = 0;
   let sourceCount = 0;
 
-  // SMOs arrive sorted: Layer 3 first, then 2, then 1, each layer newest-first
+  // SMOs arrive sorted: Layer 3 first, then 2, then 1; within each layer, newest-first so that
+  // if the char budget is exhausted, the oldest (least relevant) entries are dropped, not recent ones.
   for (const smo of smos) {
     const dateLabel = smo.date_range_start === smo.date_range_end
       ? smo.date_range_start

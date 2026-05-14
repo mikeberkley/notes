@@ -617,7 +617,7 @@ export async function getSmosForIntelligence(
     if (layer !== undefined) { sql += ' AND layer = ?'; params.push(layer); }
     if (fromDate) { sql += ' AND date_range_start >= ?'; params.push(fromDate); }
     if (toDate) { sql += ' AND date_range_start <= ?'; params.push(toDate); }
-    sql += ' ORDER BY layer DESC, date_range_start ASC LIMIT 500';
+    sql += ' ORDER BY layer DESC, date_range_start DESC LIMIT 500';
     const { results } = await db.prepare(sql).bind(...params).all<Smo>();
     return results;
   }
