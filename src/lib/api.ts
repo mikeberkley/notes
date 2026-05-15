@@ -109,6 +109,7 @@ export interface IntelligenceFilters {
   layer?: number;
   from?: string;
   to?: string;
+  includeDigests?: boolean;
 }
 
 export interface ContextMeta {

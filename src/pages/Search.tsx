@@ -455,7 +455,7 @@ function AssistantBubble({ content }: { content: string }) {
   );
 }
 
-function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; from?: string; to?: string } }) {
+function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; from?: string; to?: string; includeDigests?: boolean } }) {
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -504,7 +504,7 @@ function IntelligencePanel({ filters }: { filters: { q: string; layer?: number; 
     let accumulated = '';
     try {
       await api.intelligence.query(
-        { question, history, filters: { q: filters.q, layer: filters.layer, from: filters.from || undefined, to: filters.to || undefined }, includeRawContent, model: selectedModel },
+        { question, history, filters: { q: filters.q, layer: filters.layer, from: filters.from || undefined, to: filters.to || undefined, includeDigests: filters.includeDigests }, includeRawContent, model: selectedModel },
         {
           onMeta: (meta) => setContextMeta(meta),
           onChunk: (text) => { accumulated += text; setStreamingContent(accumulated); },
@@ -927,7 +927,7 @@ export default function Search() {
         </div>
 
         {/* Intelligence panel */}
-        <IntelligencePanel filters={{ q: resultsQuery, layer: layerFilter, from: fromDate || undefined, to: toDate || undefined }} />
+        <IntelligencePanel filters={{ q: resultsQuery, layer: layerFilter, from: fromDate || undefined, to: toDate || undefined, includeDigests: preset === 'week+digest' }} />
 
         {/* Count */}
         <div className="flex items-center justify-between mb-3">

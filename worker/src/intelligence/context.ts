@@ -12,6 +12,7 @@ export interface IntelligenceFilters {
   layer?: number;
   from?: string;
   to?: string;
+  includeDigests?: boolean;
 }
 
 export interface ContextMeta {
@@ -26,7 +27,15 @@ export async function assembleIntelligenceContext(
   filters: IntelligenceFilters,
   includeRawContent = false,
 ): Promise<{ contextBlock: string; meta: ContextMeta }> {
-  const smos = await getSmosForIntelligence(db, userId, filters.q, filters.layer, filters.from, filters.to);
+  let smos = await getSmosForIntelligence(db, userId, filters.q, filters.layer, filters.from, filters.to);
+
+  if (filters.includeDigests) {
+    const digestSmos = await getSmosForIntelligence(db, userId, filters.q, 2, undefined, undefined);
+    const seen = new Set(smos.map(s => s.id));
+    for (const d of digestSmos) {
+      if (!seen.has(d.id)) smos.push(d);
+    }
+  }
 
   if (smos.length === 0) {
     return {
