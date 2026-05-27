@@ -19,6 +19,37 @@ async function exportGoogleDoc(fileId: string, accessToken: string): Promise<str
   return resp.text();
 }
 
+interface DriveComment {
+  author: { displayName: string };
+  content: string;
+  createdTime: string;
+  resolved?: boolean;
+  replies?: Array<{ author: { displayName: string }; content: string; createdTime: string }>;
+}
+
+async function fetchDocComments(fileId: string, accessToken: string): Promise<string> {
+  const fields = 'comments(author/displayName,content,createdTime,resolved,replies(author/displayName,content,createdTime))';
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}/comments?fields=${encodeURIComponent(fields)}&includeDeleted=false`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) return '';
+
+  const data = await resp.json<{ comments?: DriveComment[] }>();
+  const comments = data.comments ?? [];
+  if (comments.length === 0) return '';
+
+  const lines: string[] = ['', '## Comments'];
+  for (const c of comments) {
+    const date = c.createdTime.slice(0, 10);
+    const resolved = c.resolved ? ' [resolved]' : '';
+    lines.push(`[${c.author.displayName}, ${date}]${resolved}: ${c.content}`);
+    for (const r of c.replies ?? []) {
+      const rDate = r.createdTime.slice(0, 10);
+      lines.push(`  [${r.author.displayName}, ${rDate}]: ${r.content}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 async function downloadFile(fileId: string, accessToken: string): Promise<ArrayBuffer> {
   const resp = await fetch(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
@@ -42,10 +73,15 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 async function extractText(file: DriveFile, accessToken: string, env: Env): Promise<string> {
-  if (
-    file.mimeType === 'application/vnd.google-apps.document' ||
-    file.mimeType === 'application/vnd.google-apps.presentation'
-  ) {
+  if (file.mimeType === 'application/vnd.google-apps.document') {
+    const [body, comments] = await Promise.all([
+      exportGoogleDoc(file.id, accessToken),
+      fetchDocComments(file.id, accessToken),
+    ]);
+    return body + comments;
+  }
+
+  if (file.mimeType === 'application/vnd.google-apps.presentation') {
     return exportGoogleDoc(file.id, accessToken);
   }
 

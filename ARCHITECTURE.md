@@ -91,7 +91,7 @@ notes/                              ← repo root (Cloudflare Pages deploys from
 │   │   │   └── session.ts          ← HS256 JWT (hand-rolled, no deps) + cookie helpers
 │   │   ├── ingestion/
 │   │   │   ├── gmail.ts            ← Gmail API: list + fetch messages, extract text/plain
-│   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs/Slides, LLM-extract PDFs
+│   │   │   ├── gdrive.ts           ← Drive API: list files, export Docs/Slides, fetch Doc comments, LLM-extract PDFs
 │   │   │   ├── workflowy.ts        ← Workflowy API: /nodes-export, tree grouping, indented outline
 │   │   │   ├── confluence.ts       ← Confluence Cloud API: CQL delta query, HTML strip, insert raw_sources
 │   │   │   └── pipeline.ts         ← orchestrates ingestion for all users
@@ -455,13 +455,17 @@ For each user with a valid Google refresh token:
   ├── Folder path tracked during traversal — each file's metadata includes
   │   folder_path (e.g. "Research" or "Work/Research") relative to the configured root
   ├── For each file modified within the last 24 hours (rolling window, timezone-independent):
-  │   ├── Google Docs / Google Slides → Drive export API as text/plain
-  │   ├── .txt / .md                  → download raw bytes, decode as UTF-8
-  │   ├── .docx / .doc               → Drive export API as text/plain (best-effort)
-  │   └── .pdf                        → download binary, send to LLM as base64 document block
-  │                                     (callLLMWithPDF in openrouter.ts); max 10 MB; skipped if larger
-  │                                     Always uses anthropic/claude-sonnet-4-6 regardless of
-  │                                     OPENROUTER_MODEL — PDF document blocks require Claude
+  │   ├── Google Docs  → Drive export API as text/plain (body) + Drive comments API
+  │   │                   (GET /drive/v3/files/{id}/comments); body and comments fetched in parallel
+  │   │                   Comments appended as a "## Comments" section: author, date, resolved flag,
+  │   │                   and any replies; docs with no comments get body text only
+  │   ├── Google Slides → Drive export API as text/plain (no comments fetched)
+  │   ├── .txt / .md   → download raw bytes, decode as UTF-8
+  │   ├── .docx / .doc → Drive export API as text/plain (best-effort)
+  │   └── .pdf         → download binary, send to LLM as base64 document block
+  │                       (callLLMWithPDF in openrouter.ts); max 10 MB; skipped if larger
+  │                       Always uses anthropic/claude-sonnet-4-6 regardless of
+  │                       OPENROUTER_MODEL — PDF document blocks require Claude
   └── Insert into raw_sources (source_type='gdrive')
        externalId = fileId::modifiedTime (re-ingests if file is updated within the window)
        metadata = { filename, mime_type, modified_time, folder_path }
