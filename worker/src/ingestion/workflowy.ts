@@ -1,6 +1,6 @@
 import { insertRawSource, getConfig } from '../db/queries.js';
 
-interface WorkflowyNode {
+export interface WorkflowyNode {
   id: string;
   name: string;
   note: string | null;
@@ -11,7 +11,13 @@ interface WorkflowyNode {
   completedAt: number | null;
 }
 
-function buildChildMap(nodes: WorkflowyNode[]): Map<string | null, WorkflowyNode[]> {
+export type EntryGroup = {
+  entryNode: WorkflowyNode;
+  dateNode: WorkflowyNode;
+  recentInGroup: WorkflowyNode[];
+};
+
+export function buildChildMap(nodes: WorkflowyNode[]): Map<string | null, WorkflowyNode[]> {
   const map = new Map<string | null, WorkflowyNode[]>();
   for (const node of nodes) {
     const siblings = map.get(node.parent_id) ?? [];
@@ -24,7 +30,7 @@ function buildChildMap(nodes: WorkflowyNode[]): Map<string | null, WorkflowyNode
   return map;
 }
 
-function findRoot(nodeId: string, nodeById: Map<string, WorkflowyNode>): WorkflowyNode {
+export function findRoot(nodeId: string, nodeById: Map<string, WorkflowyNode>): WorkflowyNode {
   let node = nodeById.get(nodeId)!;
   while (node.parent_id && nodeById.has(node.parent_id)) {
     node = nodeById.get(node.parent_id)!;
@@ -32,7 +38,7 @@ function findRoot(nodeId: string, nodeById: Map<string, WorkflowyNode>): Workflo
   return node;
 }
 
-function buildRelevantIds(
+export function buildRelevantIds(
   recentNodes: WorkflowyNode[],
   nodeById: Map<string, WorkflowyNode>,
 ): Set<string> {
@@ -47,7 +53,7 @@ function buildRelevantIds(
   return relevant;
 }
 
-function serializeSubtree(
+export function serializeSubtree(
   nodeId: string,
   childMap: Map<string | null, WorkflowyNode[]>,
   nodeById: Map<string, WorkflowyNode>,
@@ -73,7 +79,7 @@ function serializeSubtree(
 }
 
 // Returns [id, text] pairs for every node in the subtree (for deep-link URL resolution at search time)
-function buildNodeIndex(
+export function buildNodeIndex(
   nodeId: string,
   childMap: Map<string | null, WorkflowyNode[]>,
   nodeById: Map<string, WorkflowyNode>,
@@ -89,16 +95,16 @@ function buildNodeIndex(
   return result;
 }
 
-function isDateNode(node: WorkflowyNode): boolean {
+export function isDateNode(node: WorkflowyNode): boolean {
   return node.name.trimStart().startsWith('<time ');
 }
 
-function extractDateLabel(name: string): string {
+export function extractDateLabel(name: string): string {
   const match = name.match(/>([^<]+)<\/time>/);
   return match ? match[1].trim() : name.replace(/<[^>]+>/g, '').trim();
 }
 
-function stripHtml(text: string): string {
+export function stripHtml(text: string): string {
   return text
     .replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&')
@@ -113,7 +119,7 @@ function stripHtml(text: string): string {
  * Returns { dateNode, entryNode } where entryNode is the direct child
  * of the date node on the path from the original node to root.
  */
-function findDateAncestorEntry(
+export function findDateAncestorEntry(
   node: WorkflowyNode,
   nodeById: Map<string, WorkflowyNode>,
 ): { dateNode: WorkflowyNode; entryNode: WorkflowyNode } | null {
@@ -133,7 +139,7 @@ function findDateAncestorEntry(
  * Build a human-readable ancestor path from root down to (but not including) the date node.
  * e.g. "Consulting > GotPhoto > GotPhoto 2026 Engagement > Meetings"
  */
-function buildAncestorPath(dateNodeId: string, nodeById: Map<string, WorkflowyNode>): string {
+export function buildAncestorPath(dateNodeId: string, nodeById: Map<string, WorkflowyNode>): string {
   const dateNode = nodeById.get(dateNodeId);
   if (!dateNode?.parent_id) return '';
   const parts: string[] = [];
@@ -143,6 +149,38 @@ function buildAncestorPath(dateNodeId: string, nodeById: Map<string, WorkflowyNo
     current = current.parent_id ? nodeById.get(current.parent_id) : undefined;
   }
   return parts.join(' > ');
+}
+
+/**
+ * Group recent nodes into entry groups (one source per direct child of a date node)
+ * and a fallback list for nodes that have no date-node ancestor.
+ */
+export function groupRecentNodesByEntry(
+  recentNodes: WorkflowyNode[],
+  nodeById: Map<string, WorkflowyNode>,
+): { entryGroups: Map<string, EntryGroup>; fallbackRecentNodes: WorkflowyNode[] } {
+  const entryGroups = new Map<string, EntryGroup>();
+  const fallbackRecentNodes: WorkflowyNode[] = [];
+
+  for (const node of recentNodes) {
+    const found = findDateAncestorEntry(node, nodeById);
+    if (found) {
+      const existing = entryGroups.get(found.entryNode.id);
+      if (existing) {
+        existing.recentInGroup.push(node);
+      } else {
+        entryGroups.set(found.entryNode.id, {
+          entryNode: found.entryNode,
+          dateNode: found.dateNode,
+          recentInGroup: [node],
+        });
+      }
+    } else {
+      fallbackRecentNodes.push(node);
+    }
+  }
+
+  return { entryGroups, fallbackRecentNodes };
 }
 
 export async function ingestWorkflowy(
@@ -171,35 +209,7 @@ export async function ingestWorkflowy(
   const cutoff = Date.now() / 1000 - 24 * 60 * 60;
   const recentNodes = nodes.filter(n => (n.createdAt >= cutoff || n.modifiedAt >= cutoff) && n.name?.trim());
 
-  // Split by entry nodes: direct children of date-stamped nodes.
-  // Each entry node (e.g. "Standup", "Flash Pricing Meeting") becomes its own raw_source,
-  // analogous to individual Drive files. Nodes without a date-node ancestor fall back to
-  // the original root-grouping behavior.
-  type EntryGroup = {
-    entryNode: WorkflowyNode;
-    dateNode: WorkflowyNode;
-    recentInGroup: WorkflowyNode[];
-  };
-  const entryGroups = new Map<string, EntryGroup>();
-  const fallbackRecentNodes: WorkflowyNode[] = [];
-
-  for (const node of recentNodes) {
-    const found = findDateAncestorEntry(node, nodeById);
-    if (found) {
-      const existing = entryGroups.get(found.entryNode.id);
-      if (existing) {
-        existing.recentInGroup.push(node);
-      } else {
-        entryGroups.set(found.entryNode.id, {
-          entryNode: found.entryNode,
-          dateNode: found.dateNode,
-          recentInGroup: [node],
-        });
-      }
-    } else {
-      fallbackRecentNodes.push(node);
-    }
-  }
+  const { entryGroups, fallbackRecentNodes } = groupRecentNodesByEntry(recentNodes, nodeById);
 
   console.log(`[workflowy] ${recentNodes.length} recent node(s): ${entryGroups.size} entry source(s), ${fallbackRecentNodes.length} fallback node(s)`);
 
