@@ -16,7 +16,9 @@ export function buildSourceSummaryPrompt(
     label = `EMAIL — Subject: ${meta.subject ?? '(no subject)'} | From: ${meta.sender ?? 'unknown'}`;
     contentLabel = 'email';
   } else if (sourceType === 'workflowy') {
-    label = `WORKFLOWY NOTES — Section: ${meta.root_name ?? 'unknown'}`;
+    const sectionName = meta.section_name ?? meta.root_name ?? 'unknown';
+    const dateInfo = meta.date_label ? ` — ${meta.date_label}` : '';
+    label = `WORKFLOWY NOTES — ${sectionName}${dateInfo}`;
     contentLabel = 'Workflowy notes (hierarchical bullet list)';
     extraInstructions = `
 - This is a hierarchical outline. Treat each bullet as a discrete item.
@@ -102,6 +104,10 @@ export function buildLayer1Prompt(date: string, sources: Array<{
       label = `[CHAT] ${meta.title ?? 'Intelligence session'}`;
     } else if (s.type === 'gcalendar') {
       label = `[CALENDAR] ${meta.title}${meta.location ? ` | Location: ${meta.location}` : ''}`;
+    } else if (s.type === 'workflowy') {
+      const sectionName = meta.section_name ?? meta.root_name ?? 'Notes';
+      const dateInfo = meta.date_label ? ` — ${meta.date_label}` : '';
+      label = `[WORKFLOWY] ${sectionName}${dateInfo}`;
     } else if (s.type === 'slack' && meta.type === 'dm') {
       label = `[SLACK DM] With: ${meta.with_user}`;
     } else if (s.type === 'slack' && meta.type === 'channel') {
@@ -246,7 +252,11 @@ export function buildIntelligenceContextBlock(
         const meta = JSON.parse(src.metadata) as Record<string, unknown>;
         let srcLabel: string;
         if (src.source_type === 'gmail') srcLabel = `Gmail: ${String(meta.subject ?? '(no subject)')}`;
-        else if (src.source_type === 'workflowy') srcLabel = `Workflowy: ${String(meta.root_name ?? 'Note')}`;
+        else if (src.source_type === 'workflowy') {
+          const sectionName = String(meta.section_name ?? meta.root_name ?? 'Note');
+          const dateInfo = meta.date_label ? ` (${String(meta.date_label)})` : '';
+          srcLabel = `Workflowy: ${sectionName}${dateInfo}`;
+        }
         else if (src.source_type === 'slack') {
           srcLabel = meta.type === 'dm'
             ? `Slack DM: ${String(meta.with_user ?? 'Unknown')}`

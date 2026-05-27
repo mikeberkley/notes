@@ -18,7 +18,6 @@ function buildChildMap(nodes: WorkflowyNode[]): Map<string | null, WorkflowyNode
     siblings.push(node);
     map.set(node.parent_id, siblings);
   }
-  // Sort each sibling list by priority
   for (const siblings of map.values()) {
     siblings.sort((a, b) => a.priority - b.priority);
   }
@@ -39,7 +38,6 @@ function buildRelevantIds(
 ): Set<string> {
   const relevant = new Set<string>();
   for (const node of recentNodes) {
-    // Walk from this node up to root, marking every ancestor as relevant
     let current: WorkflowyNode | undefined = node;
     while (current) {
       relevant.add(current.id);
@@ -91,6 +89,62 @@ function buildNodeIndex(
   return result;
 }
 
+function isDateNode(node: WorkflowyNode): boolean {
+  return node.name.trimStart().startsWith('<time ');
+}
+
+function extractDateLabel(name: string): string {
+  const match = name.match(/>([^<]+)<\/time>/);
+  return match ? match[1].trim() : name.replace(/<[^>]+>/g, '').trim();
+}
+
+function stripHtml(text: string): string {
+  return text
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+}
+
+/**
+ * Walk up from a node to find the first date-node ancestor.
+ * Returns { dateNode, entryNode } where entryNode is the direct child
+ * of the date node on the path from the original node to root.
+ */
+function findDateAncestorEntry(
+  node: WorkflowyNode,
+  nodeById: Map<string, WorkflowyNode>,
+): { dateNode: WorkflowyNode; entryNode: WorkflowyNode } | null {
+  let current: WorkflowyNode | undefined = node;
+  while (current) {
+    const parent = current.parent_id ? nodeById.get(current.parent_id) : undefined;
+    if (!parent) break;
+    if (isDateNode(parent)) {
+      return { dateNode: parent, entryNode: current };
+    }
+    current = parent;
+  }
+  return null;
+}
+
+/**
+ * Build a human-readable ancestor path from root down to (but not including) the date node.
+ * e.g. "Consulting > GotPhoto > GotPhoto 2026 Engagement > Meetings"
+ */
+function buildAncestorPath(dateNodeId: string, nodeById: Map<string, WorkflowyNode>): string {
+  const dateNode = nodeById.get(dateNodeId);
+  if (!dateNode?.parent_id) return '';
+  const parts: string[] = [];
+  let current: WorkflowyNode | undefined = nodeById.get(dateNode.parent_id);
+  while (current) {
+    parts.unshift(stripHtml(current.name.trim()));
+    current = current.parent_id ? nodeById.get(current.parent_id) : undefined;
+  }
+  return parts.join(' > ');
+}
+
 export async function ingestWorkflowy(
   db: D1Database,
   userId: string,
@@ -117,30 +171,101 @@ export async function ingestWorkflowy(
   const cutoff = Date.now() / 1000 - 24 * 60 * 60;
   const recentNodes = nodes.filter(n => (n.createdAt >= cutoff || n.modifiedAt >= cutoff) && n.name?.trim());
 
-  // Group recently-created nodes by their root ancestor
-  const rootIds = new Set(recentNodes.map(n => findRoot(n.id, nodeById).id));
-  console.log(`[workflowy] ${recentNodes.length} recent node(s) across ${rootIds.size} root tree(s)`);
+  // Split by entry nodes: direct children of date-stamped nodes.
+  // Each entry node (e.g. "Standup", "Flash Pricing Meeting") becomes its own raw_source,
+  // analogous to individual Drive files. Nodes without a date-node ancestor fall back to
+  // the original root-grouping behavior.
+  type EntryGroup = {
+    entryNode: WorkflowyNode;
+    dateNode: WorkflowyNode;
+    recentInGroup: WorkflowyNode[];
+  };
+  const entryGroups = new Map<string, EntryGroup>();
+  const fallbackRecentNodes: WorkflowyNode[] = [];
 
-  // Only render nodes that are recent or ancestors of recent nodes
-  const relevantIds = buildRelevantIds(recentNodes, nodeById);
+  for (const node of recentNodes) {
+    const found = findDateAncestorEntry(node, nodeById);
+    if (found) {
+      const existing = entryGroups.get(found.entryNode.id);
+      if (existing) {
+        existing.recentInGroup.push(node);
+      } else {
+        entryGroups.set(found.entryNode.id, {
+          entryNode: found.entryNode,
+          dateNode: found.dateNode,
+          recentInGroup: [node],
+        });
+      }
+    } else {
+      fallbackRecentNodes.push(node);
+    }
+  }
 
-  for (const rootId of rootIds) {
+  console.log(`[workflowy] ${recentNodes.length} recent node(s): ${entryGroups.size} entry source(s), ${fallbackRecentNodes.length} fallback node(s)`);
+
+  // Emit one raw_source per entry node
+  for (const { entryNode, dateNode, recentInGroup } of entryGroups.values()) {
     try {
-      const root = nodeById.get(rootId)!;
-      const content = serializeSubtree(rootId, childMap, nodeById, relevantIds);
+      // Include the entry node itself plus all ancestors of recent nodes up to the entry node
+      const relevantIds = new Set<string>([entryNode.id]);
+      for (const node of recentInGroup) {
+        let current: WorkflowyNode | undefined = node;
+        while (current && current.id !== entryNode.id) {
+          relevantIds.add(current.id);
+          current = current.parent_id ? nodeById.get(current.parent_id) : undefined;
+        }
+      }
+
+      const content = serializeSubtree(entryNode.id, childMap, nodeById, relevantIds);
       if (!content.trim()) continue;
 
+      const ancestorPath = buildAncestorPath(dateNode.id, nodeById);
+      const dateLabel = extractDateLabel(dateNode.name);
+      const sectionName = stripHtml(entryNode.name.trim());
+
+      // Prefix with path context so the LLM knows where in the outline this came from
+      const fullContent = `Path: ${ancestorPath} > ${dateLabel}\n\n${content}`;
+
+      const root = findRoot(entryNode.id, nodeById);
       const metadata = {
-        root_node_id: rootId,
+        root_node_id: root.id,
         root_name: root.name,
-        recent_node_count: recentNodes.filter(n => findRoot(n.id, nodeById).id === rootId).length,
-        node_index: buildNodeIndex(rootId, childMap, nodeById, relevantIds),
+        section_node_id: entryNode.id,
+        section_name: sectionName,
+        date_label: dateLabel,
+        ancestor_path: ancestorPath,
+        recent_node_count: recentInGroup.length,
+        node_index: buildNodeIndex(entryNode.id, childMap, nodeById, relevantIds),
       };
 
-      // externalId includes date so each day's snapshot is a distinct record
-      await insertRawSource(db, userId, 'workflowy', `${rootId}::${date}`, content, metadata, date);
+      await insertRawSource(db, userId, 'workflowy', `${entryNode.id}::${date}`, fullContent, metadata, date);
     } catch (err) {
-      console.error(`[workflowy] Root ${rootId} error:`, err);
+      console.error(`[workflowy] Entry ${entryNode.id} error:`, err);
+    }
+  }
+
+  // Fallback: nodes without a date-node ancestor — group by root (original behavior)
+  if (fallbackRecentNodes.length > 0) {
+    const rootIds = new Set(fallbackRecentNodes.map(n => findRoot(n.id, nodeById).id));
+    const relevantIds = buildRelevantIds(fallbackRecentNodes, nodeById);
+
+    for (const rootId of rootIds) {
+      try {
+        const root = nodeById.get(rootId)!;
+        const content = serializeSubtree(rootId, childMap, nodeById, relevantIds);
+        if (!content.trim()) continue;
+
+        const metadata = {
+          root_node_id: rootId,
+          root_name: root.name,
+          recent_node_count: fallbackRecentNodes.filter(n => findRoot(n.id, nodeById).id === rootId).length,
+          node_index: buildNodeIndex(rootId, childMap, nodeById, relevantIds),
+        };
+
+        await insertRawSource(db, userId, 'workflowy', `${rootId}::${date}`, content, metadata, date);
+      } catch (err) {
+        console.error(`[workflowy] Root ${rootId} error:`, err);
+      }
     }
   }
 }
