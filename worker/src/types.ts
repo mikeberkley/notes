@@ -13,6 +13,8 @@ export interface User {
   id: string;
   google_sub: string;
   email: string;
+  ingestion_enabled: number; // 1 = enabled, 0 = disabled (SQLite boolean)
+  owner_user_id: string | null;
   created_at: string;
 }
 

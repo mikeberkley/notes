@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api, type ApiKeyRecord } from '../lib/api.js';
+import { api, type ApiKeyRecord, type AccountRecord } from '../lib/api.js';
 
 export default function Settings() {
   const [settings, setSettings] = useState<{ gdrive_folder_id: string | null; workflowy_api_key: string | null; slack_token: string | null; intelligence_system_prompt: string | null; intelligence_context: string | null; connections: { google: boolean }; confluence_email: string | null; confluence_api_token: string | null; confluence_space_key: string | null; confluence_base_url: string | null } | null>(null);
@@ -15,12 +15,15 @@ export default function Settings() {
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [newKeyValue, setNewKeyValue] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<AccountRecord[]>([]);
+  const [linkEmailInput, setLinkEmailInput] = useState('');
+  const [linkError, setLinkError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.settings.get(), api.keys.list()])
-      .then(([s, k]) => {
+    Promise.all([api.settings.get(), api.keys.list(), api.accounts.list()])
+      .then(([s, k, a]) => {
         setSettings(s);
         setFolderInput(s.gdrive_folder_id ?? '');
         setIntelligenceSystemPromptInput(s.intelligence_system_prompt ?? '');
@@ -29,6 +32,7 @@ export default function Settings() {
         setConfluenceSpaceKeyInput(s.confluence_space_key ?? '');
         setConfluenceBaseUrlInput(s.confluence_base_url ?? '');
         setKeys(k);
+        setAccounts(a);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -106,6 +110,33 @@ export default function Settings() {
     setTimeout(() => setMessage(''), 2000);
   }
 
+  async function toggleIngestion(id: string, enabled: boolean) {
+    await api.accounts.setIngestion(id, enabled);
+    setAccounts(prev => prev.map(a => a.id === id ? { ...a, ingestion_enabled: enabled } : a));
+    setMessage(`Ingestion ${enabled ? 'enabled' : 'disabled'}.`);
+    setTimeout(() => setMessage(''), 2000);
+  }
+
+  async function linkAccount() {
+    setLinkError('');
+    try {
+      const { account } = await api.accounts.link(linkEmailInput.trim());
+      setAccounts(prev => [...prev, account]);
+      setLinkEmailInput('');
+      setMessage('Account linked.');
+      setTimeout(() => setMessage(''), 2000);
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Failed to link account');
+    }
+  }
+
+  async function unlinkAccount(id: string) {
+    await api.accounts.unlink(id);
+    setAccounts(prev => prev.filter(a => a.id !== id));
+    setMessage('Account unlinked.');
+    setTimeout(() => setMessage(''), 2000);
+  }
+
   async function triggerIngest() {
     await api.admin.triggerIngest();
     setMessage('Ingestion triggered.');
@@ -145,6 +176,65 @@ export default function Settings() {
             >
               {settings?.connections.google ? 'Reconnect' : 'Connect'}
             </a>
+          </div>
+        </section>
+
+        {/* Accounts */}
+        <section className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="font-semibold text-gray-900 mb-1">Accounts</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Manage which accounts are ingested and link consulting accounts to your personal login.
+          </p>
+
+          <div className="space-y-3 mb-5">
+            {accounts.map(account => (
+              <div key={account.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{account.email}</p>
+                  {account.is_self && <p className="text-xs text-gray-400">This account</p>}
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={account.ingestion_enabled}
+                      onChange={e => toggleIngestion(account.id, e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Ingest
+                  </label>
+                  {!account.is_self && (
+                    <button
+                      onClick={() => unlinkAccount(account.id)}
+                      className="text-xs text-red-500 hover:text-red-700"
+                    >
+                      Unlink
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-gray-700 mb-2">Link a consulting account</p>
+            <p className="text-xs text-gray-400 mb-2">The account must have logged in at least once. Enter the email address used to sign in.</p>
+            {linkError && <p className="text-xs text-red-500 mb-2">{linkError}</p>}
+            <div className="flex gap-2">
+              <input
+                value={linkEmailInput}
+                onChange={e => setLinkEmailInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && linkAccount()}
+                placeholder="consulting@client.com"
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                onClick={linkAccount}
+                className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700"
+              >
+                Link
+              </button>
+            </div>
           </div>
         </section>
 

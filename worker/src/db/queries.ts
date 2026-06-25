@@ -13,10 +13,40 @@ export async function getUserById(db: D1Database, id: string): Promise<User | nu
   return row ?? null;
 }
 
+export async function getUserByEmail(db: D1Database, email: string): Promise<User | null> {
+  const row = await db.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<User>();
+  return row ?? null;
+}
+
 export async function createUser(db: D1Database, googleSub: string, email: string): Promise<User> {
   const id = randomUUID();
   await db.prepare('INSERT INTO users (id, google_sub, email) VALUES (?, ?, ?)').bind(id, googleSub, email).run();
-  return { id, google_sub: googleSub, email, created_at: new Date().toISOString() };
+  return { id, google_sub: googleSub, email, ingestion_enabled: 1, owner_user_id: null, created_at: new Date().toISOString() };
+}
+
+export async function getLinkedAccounts(db: D1Database, ownerUserId: string): Promise<User[]> {
+  const { results } = await db.prepare(
+    'SELECT * FROM users WHERE owner_user_id = ? ORDER BY email'
+  ).bind(ownerUserId).all<User>();
+  return results;
+}
+
+// Returns IDs of all accounts the given user can view: themselves + any accounts they own.
+export async function getAccessibleAccountIds(db: D1Database, userId: string): Promise<string[]> {
+  const linked = await getLinkedAccounts(db, userId);
+  return [userId, ...linked.map(u => u.id)];
+}
+
+export async function setIngestionEnabled(db: D1Database, userId: string, enabled: boolean): Promise<void> {
+  await db.prepare('UPDATE users SET ingestion_enabled = ? WHERE id = ?').bind(enabled ? 1 : 0, userId).run();
+}
+
+export async function linkAccount(db: D1Database, targetUserId: string, ownerUserId: string): Promise<void> {
+  await db.prepare('UPDATE users SET owner_user_id = ? WHERE id = ?').bind(ownerUserId, targetUserId).run();
+}
+
+export async function unlinkAccount(db: D1Database, targetUserId: string): Promise<void> {
+  await db.prepare('UPDATE users SET owner_user_id = NULL WHERE id = ?').bind(targetUserId).run();
 }
 
 // ─── OAuth Tokens ─────────────────────────────────────────────────────────────
@@ -752,7 +782,7 @@ export async function getAllUsersWithTokens(db: D1Database): Promise<User[]> {
   const { results } = await db.prepare(`
     SELECT u.* FROM users u
     INNER JOIN oauth_tokens t ON t.user_id = u.id AND t.provider = 'google'
-    WHERE t.refresh_token != ''
+    WHERE t.refresh_token != '' AND u.ingestion_enabled = 1
   `).all<User>();
   return results;
 }

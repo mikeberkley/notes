@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, type SearchResult, type SmoDetail, type SourceSummaryItem, type ChatMessage, type ContextMeta } from '../lib/api.js';
+import { api, getActiveAccountId, setActiveAccountId, type SearchResult, type SmoDetail, type SourceSummaryItem, type ChatMessage, type ContextMeta, type AccountRecord } from '../lib/api.js';
 
 const CHAT_MODELS = [
   { id: 'google/gemini-2.5-flash',      label: 'Gemini 2.5 Flash',  cost: '$0.30 / $2.50'   },
@@ -786,8 +786,20 @@ export default function Search() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [loading, setLoading] = useState(true);
+  const [accounts, setAccounts] = useState<AccountRecord[]>([]);
+  const [activeAccountId, setActiveAccountIdState] = useState<string | null>(getActiveAccountId);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const presetRef = useRef<Preset>('all');
+
+  useEffect(() => {
+    api.accounts.list().then(setAccounts).catch(() => {});
+  }, []);
+
+  function switchAccount(id: string) {
+    setActiveAccountId(id);
+    setActiveAccountIdState(id);
+    fetchResults(query, layerFilter, fromDate, toDate);
+  }
 
   function applyPreset(p: Preset) {
     const f = getPresetFilters(p);
@@ -848,6 +860,18 @@ export default function Search() {
       <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <span className="font-semibold text-gray-900">Notes</span>
         <div className="flex items-center gap-3">
+          {accounts.length > 1 && (
+            <select
+              value={activeAccountId ?? accounts[0]?.id ?? ''}
+              onChange={e => switchAccount(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+              title="Switch account"
+            >
+              {accounts.map(a => (
+                <option key={a.id} value={a.id}>{a.email}</option>
+              ))}
+            </select>
+          )}
           <a href="/settings" className="text-sm text-gray-500 hover:text-gray-800">Settings</a>
           <button
             onClick={() => api.auth.logout().then(() => { window.location.href = '/'; })}

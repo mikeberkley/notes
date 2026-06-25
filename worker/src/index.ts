@@ -5,6 +5,7 @@ import { requireSession, clearSessionCookie } from './auth/session.js';
 import { handleAgentRequest } from './agent/router.js';
 import {
   getUserById,
+  getUserByEmail,
   getConfig,
   setConfig,
   getOAuthToken,
@@ -20,6 +21,11 @@ import {
   listApiKeys,
   deleteApiKey,
   upsertChatSession,
+  getLinkedAccounts,
+  getAccessibleAccountIds,
+  setIngestionEnabled,
+  linkAccount,
+  unlinkAccount,
 } from './db/queries.js';
 import { generateRawApiKey, hashKey } from './db/utils.js';
 import { runIngestionPipeline } from './ingestion/pipeline.js';
@@ -61,34 +67,105 @@ export default {
 
     const userId = session.sub;
 
+    // Resolves which account's data to show. Defaults to the logged-in user.
+    // If account_id is provided, it must be the user's own ID or a linked account they own.
+    async function resolveAccountId(requestedId?: string | null): Promise<string | null> {
+      if (!requestedId || requestedId === userId) return userId;
+      const accessible = await getAccessibleAccountIds(env.DB, userId);
+      return accessible.includes(requestedId) ? requestedId : null;
+    }
+
     // GET /api/auth/me
     if (path === '/api/auth/me') {
-      const user = await getUserById(env.DB, userId);
-      return json(user ? { id: user.id, email: user.email } : null);
+      const [user, linked] = await Promise.all([
+        getUserById(env.DB, userId),
+        getLinkedAccounts(env.DB, userId),
+      ]);
+      if (!user) return json(null);
+      return json({
+        id: user.id,
+        email: user.email,
+        ingestion_enabled: user.ingestion_enabled === 1,
+        accounts: [
+          { id: user.id, email: user.email, ingestion_enabled: user.ingestion_enabled === 1 },
+          ...linked.map(u => ({ id: u.id, email: u.email, ingestion_enabled: u.ingestion_enabled === 1 })),
+        ],
+      });
+    }
+
+    // GET /api/accounts
+    if (path === '/api/accounts' && request.method === 'GET') {
+      const [self, linked] = await Promise.all([
+        getUserById(env.DB, userId),
+        getLinkedAccounts(env.DB, userId),
+      ]);
+      if (!self) return json([]);
+      return json([
+        { id: self.id, email: self.email, ingestion_enabled: self.ingestion_enabled === 1, is_self: true },
+        ...linked.map(u => ({ id: u.id, email: u.email, ingestion_enabled: u.ingestion_enabled === 1, is_self: false })),
+      ]);
+    }
+
+    // PUT /api/accounts/:id/ingestion — toggle ingestion_enabled
+    const accountIngestionMatch = path.match(/^\/api\/accounts\/([^/]+)\/ingestion$/);
+    if (accountIngestionMatch && request.method === 'PUT') {
+      const targetId = accountIngestionMatch[1];
+      const resolved = await resolveAccountId(targetId);
+      if (!resolved) return json({ error: 'Not found or not accessible' }, 403);
+      const body = await request.json<{ enabled: boolean }>();
+      await setIngestionEnabled(env.DB, resolved, body.enabled);
+      return json({ ok: true });
+    }
+
+    // POST /api/accounts/link — link a consulting account by email
+    if (path === '/api/accounts/link' && request.method === 'POST') {
+      const body = await request.json<{ email: string }>();
+      if (!body.email) return json({ error: 'email required' }, 400);
+      const target = await getUserByEmail(env.DB, body.email.trim().toLowerCase());
+      if (!target) return json({ error: 'No account found with that email. They must log in at least once first.' }, 404);
+      if (target.id === userId) return json({ error: 'Cannot link your own account' }, 400);
+      await linkAccount(env.DB, target.id, userId);
+      return json({ ok: true, account: { id: target.id, email: target.email, ingestion_enabled: target.ingestion_enabled === 1 } });
+    }
+
+    // DELETE /api/accounts/:id/link — unlink a consulting account
+    const accountLinkMatch = path.match(/^\/api\/accounts\/([^/]+)\/link$/);
+    if (accountLinkMatch && request.method === 'DELETE') {
+      const targetId = accountLinkMatch[1];
+      const accessible = await getAccessibleAccountIds(env.DB, userId);
+      if (!accessible.includes(targetId) || targetId === userId) return json({ error: 'Not found or not accessible' }, 403);
+      await unlinkAccount(env.DB, targetId);
+      return json({ ok: true });
     }
 
     // GET /api/search
     if (path === '/api/search') {
+      const accountId = await resolveAccountId(url.searchParams.get('account_id'));
+      if (!accountId) return json({ error: 'Not accessible' }, 403);
       const q = url.searchParams.get('q') ?? '';
       const layer = url.searchParams.has('layer') ? parseInt(url.searchParams.get('layer')!, 10) : undefined;
       const from = url.searchParams.get('from') ?? undefined;
       const to = url.searchParams.get('to') ?? undefined;
-      const results = await searchSmos(env.DB, userId, q, layer, from, to);
+      const results = await searchSmos(env.DB, accountId, q, layer, from, to);
       return json(results);
     }
 
     // GET /api/smos
     if (path === '/api/smos' && request.method === 'GET') {
+      const accountId = await resolveAccountId(url.searchParams.get('account_id'));
+      if (!accountId) return json({ error: 'Not accessible' }, 403);
       const layer = parseInt(url.searchParams.get('layer') ?? '1', 10);
       const date = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
-      const smos = await getSmosByLayerAndDate(env.DB, userId, layer, date);
+      const smos = await getSmosByLayerAndDate(env.DB, accountId, layer, date);
       return json(smos);
     }
 
     // GET /api/smos/:id
     const smoMatch = path.match(/^\/api\/smos\/([^/]+)$/);
     if (smoMatch && request.method === 'GET') {
-      const smo = await getSmoById(env.DB, smoMatch[1], userId);
+      const accountId = await resolveAccountId(url.searchParams.get('account_id'));
+      if (!accountId) return json({ error: 'Not accessible' }, 403);
+      const smo = await getSmoById(env.DB, smoMatch[1], accountId);
       if (!smo) return notFound();
       const themes = await getThemesBySmoId(env.DB, smo.id);
       return json({
@@ -103,16 +180,20 @@ export default {
     // GET /api/smos/:id/children
     const childrenMatch = path.match(/^\/api\/smos\/([^/]+)\/children$/);
     if (childrenMatch && request.method === 'GET') {
-      const smo = await getSmoById(env.DB, childrenMatch[1], userId);
+      const accountId = await resolveAccountId(url.searchParams.get('account_id'));
+      if (!accountId) return json({ error: 'Not accessible' }, 403);
+      const smo = await getSmoById(env.DB, childrenMatch[1], accountId);
       if (!smo) return notFound();
-      const children = await getChildSmos(env.DB, smo.id, userId);
+      const children = await getChildSmos(env.DB, smo.id, accountId);
       return json(children);
     }
 
     // GET /api/smos/:id/sources
     const smoSourcesMatch = path.match(/^\/api\/smos\/([^/]+)\/sources$/);
     if (smoSourcesMatch && request.method === 'GET') {
-      const smo = await getSmoById(env.DB, smoSourcesMatch[1], userId);
+      const accountId = await resolveAccountId(url.searchParams.get('account_id'));
+      if (!accountId) return json({ error: 'Not accessible' }, 403);
+      const smo = await getSmoById(env.DB, smoSourcesMatch[1], accountId);
       if (!smo) return notFound();
       const pointers = await getSourcePointers(env.DB, smo.id);
       return json(pointers);
@@ -121,9 +202,11 @@ export default {
     // GET /api/smos/:id/source-summaries
     const smoSrcSummariesMatch = path.match(/^\/api\/smos\/([^/]+)\/source-summaries$/);
     if (smoSrcSummariesMatch && request.method === 'GET') {
-      const smo = await getSmoById(env.DB, smoSrcSummariesMatch[1], userId);
+      const accountId = await resolveAccountId(url.searchParams.get('account_id'));
+      if (!accountId) return json({ error: 'Not accessible' }, 403);
+      const smo = await getSmoById(env.DB, smoSrcSummariesMatch[1], accountId);
       if (!smo) return notFound();
-      const raw = await getSmoSourceSummaries(env.DB, smo.id, userId);
+      const raw = await getSmoSourceSummaries(env.DB, smo.id, accountId);
 
       const processed = raw.map(rs => {
         const meta = JSON.parse(rs.metadata) as Record<string, unknown>;
@@ -182,7 +265,9 @@ export default {
     // GET /api/raw-sources/:id
     const rawSourceMatch = path.match(/^\/api\/raw-sources\/([^/]+)$/);
     if (rawSourceMatch && request.method === 'GET') {
-      const rs = await getRawSourceById(env.DB, rawSourceMatch[1], userId);
+      const accountId = await resolveAccountId(url.searchParams.get('account_id'));
+      if (!accountId) return json({ error: 'Not accessible' }, 403);
+      const rs = await getRawSourceById(env.DB, rawSourceMatch[1], accountId);
       if (!rs) return notFound();
       return json({
         ...rs,
@@ -256,7 +341,10 @@ export default {
 
     // POST /api/intelligence/query
     if (path === '/api/intelligence/query' && request.method === 'POST') {
-      return handleIntelligenceQuery(request, env, userId, ctx);
+      const accountId = url.searchParams.get('account_id');
+      const resolved = accountId ? await resolveAccountId(accountId) : userId;
+      if (!resolved) return json({ error: 'Not accessible' }, 403);
+      return handleIntelligenceQuery(request, env, resolved, ctx);
     }
 
     // POST /api/chat-sessions

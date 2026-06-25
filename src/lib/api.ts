@@ -1,5 +1,24 @@
 const API_URL = import.meta.env.VITE_API_URL ?? 'https://notes-api.lost2038.com';
 
+// Active account for cross-account access. Persisted in localStorage.
+const ACTIVE_ACCOUNT_KEY = 'notes_active_account_id';
+
+export function getActiveAccountId(): string | null {
+  return localStorage.getItem(ACTIVE_ACCOUNT_KEY);
+}
+
+export function setActiveAccountId(id: string | null): void {
+  if (id) localStorage.setItem(ACTIVE_ACCOUNT_KEY, id);
+  else localStorage.removeItem(ACTIVE_ACCOUNT_KEY);
+}
+
+function withAccountParam(path: string, accountId?: string | null): string {
+  const id = accountId ?? getActiveAccountId();
+  if (!id) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}account_id=${encodeURIComponent(id)}`;
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -118,10 +137,27 @@ export interface ContextMeta {
   token_estimate: number;
 }
 
+export interface AccountRecord {
+  id: string;
+  email: string;
+  ingestion_enabled: boolean;
+  is_self: boolean;
+}
+
 export const api = {
   auth: {
-    me: () => apiFetch<{ id: string; email: string } | null>('/api/auth/me'),
+    me: () => apiFetch<{ id: string; email: string; ingestion_enabled: boolean; accounts: AccountRecord[] } | null>('/api/auth/me'),
     logout: () => apiFetch<void>('/api/auth/logout', { method: 'POST' }),
+  },
+
+  accounts: {
+    list: () => apiFetch<AccountRecord[]>('/api/accounts'),
+    setIngestion: (id: string, enabled: boolean) =>
+      apiFetch<{ ok: boolean }>(`/api/accounts/${id}/ingestion`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+    link: (email: string) =>
+      apiFetch<{ ok: boolean; account: AccountRecord }>('/api/accounts/link', { method: 'POST', body: JSON.stringify({ email }) }),
+    unlink: (id: string) =>
+      apiFetch<{ ok: boolean }>(`/api/accounts/${id}/link`, { method: 'DELETE' }),
   },
 
   search: (q: string, layer?: number, from?: string, to?: string) => {
@@ -129,21 +165,21 @@ export const api = {
     if (layer) params.set('layer', String(layer));
     if (from) params.set('from', from);
     if (to) params.set('to', to);
-    return apiFetch<SearchResult[]>(`/api/search?${params}`);
+    return apiFetch<SearchResult[]>(withAccountParam(`/api/search?${params}`));
   },
 
   smos: {
     list: (layer: number, date: string) =>
-      apiFetch<SmoDetail[]>(`/api/smos?layer=${layer}&date=${date}`),
-    get: (id: string) => apiFetch<SmoDetail>(`/api/smos/${id}`),
-    children: (id: string) => apiFetch<SmoDetail[]>(`/api/smos/${id}/children`),
+      apiFetch<SmoDetail[]>(withAccountParam(`/api/smos?layer=${layer}&date=${date}`)),
+    get: (id: string) => apiFetch<SmoDetail>(withAccountParam(`/api/smos/${id}`)),
+    children: (id: string) => apiFetch<SmoDetail[]>(withAccountParam(`/api/smos/${id}/children`)),
     sources: (id: string) =>
-      apiFetch<Array<{ target_type: string; target_id: string }>>(`/api/smos/${id}/sources`),
-    sourceSummaries: (id: string) => apiFetch<SourceSummaryItem[]>(`/api/smos/${id}/source-summaries`),
+      apiFetch<Array<{ target_type: string; target_id: string }>>(withAccountParam(`/api/smos/${id}/sources`)),
+    sourceSummaries: (id: string) => apiFetch<SourceSummaryItem[]>(withAccountParam(`/api/smos/${id}/source-summaries`)),
   },
 
   rawSources: {
-    get: (id: string) => apiFetch<RawSource>(`/api/raw-sources/${id}`),
+    get: (id: string) => apiFetch<RawSource>(withAccountParam(`/api/raw-sources/${id}`)),
   },
 
   settings: {
@@ -206,7 +242,11 @@ export const api = {
       },
       signal?: AbortSignal,
     ): Promise<void> => {
-      const resp = await fetch(`${API_URL}/api/intelligence/query`, {
+      const accountId = getActiveAccountId();
+      const url = accountId
+        ? `${API_URL}/api/intelligence/query?account_id=${encodeURIComponent(accountId)}`
+        : `${API_URL}/api/intelligence/query`;
+      const resp = await fetch(url, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
