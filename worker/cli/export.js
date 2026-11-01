@@ -243,16 +243,26 @@ function renderIndex(smos, sources, ctx, outDir) {
     md += '\n\n';
   }
 
+  const orphans = sources.filter(s => !(ctx.smosOfSource.get(s.id)?.length))
+    .sort((a, b) => b.source_date.localeCompare(a.source_date));
+  if (orphans.length) {
+    md += '## Sources not linked to any memory\n\n';
+    md += orphans.map(s => `- ${s.source_date} · ${link(file, ctx.sourcePath.get(s.id), sourceTitle(s))} (${s.source_type})`).join('\n');
+    md += '\n';
+  }
+
   return md;
 }
 
-// ── main ────────────────────────────────────────────────────────────────────
+// ── data loading ────────────────────────────────────────────────────────────
+// Both loaders return the same shapes:
+//   smo:    full row + themes[{headline,summary}] + children[{id,layer,headline,date_range_*}]
+//           + sources[{raw_source_id, source_type}]
+//   source: full raw_sources row with metadata parsed
 
-export async function cmdExport(args, config, apiFetch) {
-  const outDir = typeof args.out === 'string' ? args.out : 'notes-export';
+async function loadFromApi(args, config, apiFetch, log) {
   const concurrency = parseInt(args.concurrency ?? '6', 10) || 6;
   const withSources = args['no-sources'] !== true;
-  const log = (...a) => console.error(...a);
 
   // 1. List every SMO in every layer (no date filter = all of them).
   const listed = [];
@@ -262,7 +272,7 @@ export async function cmdExport(args, config, apiFetch) {
     listed.push(...rows);
   }
 
-  // 2. Fetch full detail (themes, decisions, child ids) and source lists.
+  // 2. Full detail (themes, decisions, child ids) and source lists.
   let done = 0;
   const smos = await mapLimit(listed, concurrency, async row => {
     const smo = await apiFetch(`/smo/${row.id}?depth=1`, config);
@@ -271,7 +281,7 @@ export async function cmdExport(args, config, apiFetch) {
     return smo;
   });
 
-  // 3. Fetch every referenced raw source once.
+  // 3. Every referenced raw source, once.
   const sourceIds = [...new Set(smos.flatMap(s => s.sources.map(x => x.raw_source_id)))];
   done = 0;
   const sources = (await mapLimit(sourceIds, concurrency, async id => {
@@ -280,7 +290,94 @@ export async function cmdExport(args, config, apiFetch) {
     return rs;
   })).filter(Boolean);
 
-  // 4. Assign file paths (deduplicating names) and build cross-reference maps.
+  return { smos, sources };
+}
+
+// Reads a D1 export (.sql, e.g. from `wrangler d1 export` or the weekly R2
+// backup) or a SQLite file directly. Only users / smos / themes /
+// source_pointers / raw_sources are read — never oauth_tokens or api_keys.
+// Unlike the API path, this includes raw sources not linked to any SMO.
+async function loadFromDb(args, log) {
+  // node:sqlite (Node 22.5+) prints an ExperimentalWarning on load; silence just that one.
+  const emit = process.emitWarning;
+  process.emitWarning = (w, ...rest) => (String(w).includes('SQLite') ? undefined : emit.call(process, w, ...rest));
+  const { DatabaseSync } = await import('node:sqlite');
+  process.emitWarning = emit;
+  const { readFileSync } = await import('fs');
+  const file = args.db;
+  let db;
+  if (/\.sql$/i.test(file)) {
+    db = new DatabaseSync(':memory:');
+    db.exec(readFileSync(file, 'utf8'));
+  } else {
+    db = new DatabaseSync(file, { readOnly: true });
+  }
+
+  const users = db.prepare('SELECT id, email FROM users ORDER BY email').all();
+  let user;
+  if (typeof args.email === 'string') {
+    user = users.find(u => u.email.toLowerCase() === args.email.toLowerCase());
+    if (!user) throw new Error(`No user with email ${args.email}. Users in this database: ${users.map(u => u.email).join(', ')}`);
+  } else if (users.length === 1) {
+    user = users[0];
+  } else {
+    throw new Error(`This database has ${users.length} users; pick one with --email <address>: ${users.map(u => u.email).join(', ')}`);
+  }
+  log(`Exporting data for ${user.email}`);
+
+  const withSources = args['no-sources'] !== true;
+  const rows = db.prepare('SELECT * FROM smos WHERE user_id = ? ORDER BY layer, date_range_start').all(user.id);
+  const byId = new Map(rows.map(r => [r.id, r]));
+  const themes = db.prepare('SELECT smo_id, headline, summary FROM themes WHERE user_id = ? ORDER BY smo_id, sort_order').all(user.id);
+  const pointers = db.prepare(`SELECT sp.smo_id, sp.target_type, sp.target_id FROM source_pointers sp
+    JOIN smos s ON s.id = sp.smo_id WHERE s.user_id = ?`).all(user.id);
+  const rawRows = withSources
+    ? db.prepare('SELECT * FROM raw_sources WHERE user_id = ? ORDER BY source_date').all(user.id)
+    : [];
+  const rawById = new Map(rawRows.map(r => [r.id, r]));
+
+  const smos = rows.map(r => ({ ...r, themes: [], children: [], sources: [] }));
+  const smoById = new Map(smos.map(s => [s.id, s]));
+  for (const t of themes) smoById.get(t.smo_id)?.themes.push({ headline: t.headline, summary: t.summary });
+  for (const p of pointers) {
+    const s = smoById.get(p.smo_id);
+    if (!s) continue;
+    if (p.target_type === 'smo' && byId.has(p.target_id)) {
+      const c = byId.get(p.target_id);
+      s.children.push({ id: c.id, layer: c.layer, headline: c.headline, date_range_start: c.date_range_start, date_range_end: c.date_range_end });
+    } else if (p.target_type === 'raw_source' && rawById.has(p.target_id)) {
+      s.sources.push({ raw_source_id: p.target_id, source_type: rawById.get(p.target_id).source_type });
+    }
+  }
+  for (const s of smos) s.children.sort((a, b) => a.date_range_start.localeCompare(b.date_range_start));
+
+  const sources = rawRows.map(r => ({ ...r, metadata: parseMaybeJson(r.metadata) ?? {} }));
+  log(`${smos.length} memories, ${sources.length} sources`);
+  return { smos, sources };
+}
+
+// ── main ────────────────────────────────────────────────────────────────────
+
+export async function cmdExport(args, config, apiFetch) {
+  const outDir = typeof args.out === 'string' ? args.out : 'notes-export';
+  const log = (...a) => console.error(...a);
+
+  let smos, sources;
+  try {
+    ({ smos, sources } = typeof args.db === 'string'
+      ? await loadFromDb(args, log)
+      : await loadFromApi(args, config, apiFetch, log));
+  } catch (err) {
+    log(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  writeExport(smos, sources, outDir);
+  log(`\nExported ${smos.length} memories and ${sources.length} sources to ${outDir}/`);
+}
+
+export function writeExport(smos, sources, outDir) {
+  // Assign file paths (deduplicating names) and build cross-reference maps.
   const used = new Set();
   const unique = p => {
     let candidate = p, n = 2;
@@ -315,5 +412,4 @@ export async function cmdExport(args, config, apiFetch) {
   for (const rs of sources) write(ctx.sourcePath.get(rs.id), renderSource(rs, ctx));
   write(join(outDir, 'index.md'), renderIndex(smos, sources, ctx, outDir));
 
-  log(`\nExported ${smos.length} memories and ${sources.length} sources to ${outDir}/`);
 }

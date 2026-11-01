@@ -159,6 +159,7 @@ Commands:
   notes hierarchy [--from <date>] [--to <date>]
   notes smo <id> [--depth 0|1|2]
   notes export [--out <dir>] [--no-sources] [--concurrency <n>]
+  notes export --db <dump.sql|file.sqlite> [--email <addr>] [--out <dir>]   (no API key needed)
   notes config set api-key <key>
   notes config set api-url <url>
   notes config list`);
