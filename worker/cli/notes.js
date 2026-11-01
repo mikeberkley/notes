@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { cmdExport } from './export.js';
 
 const CONFIG_DIR = join(homedir(), '.notes');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -43,7 +44,7 @@ function parseArgs(argv) {
   return args;
 }
 
-async function apiFetch(path, config) {
+async function apiFetch(path, config, opts = {}) {
   const apiUrl = config['api-url'] ?? 'https://notes-api.lost2038.com';
   const apiKey = config['api-key'];
   if (!apiKey) {
@@ -55,6 +56,8 @@ async function apiFetch(path, config) {
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+
+  if (resp.status === 404 && opts.allow404) return null;
 
   if (!resp.ok) {
     console.error(`API error ${resp.status}: ${await resp.text()}`);
@@ -146,6 +149,7 @@ async function main() {
     case 'context':   return cmdContext(args, config);
     case 'hierarchy': return cmdHierarchy(args, config);
     case 'smo':       return cmdSmo(args, config);
+    case 'export':    return cmdExport(args, config, apiFetch);
     case 'config':    return cmdConfig(args);
     default:
       console.log(`notes — Notes App CLI
@@ -154,6 +158,7 @@ Commands:
   notes context --query <text> [--budget <n>] [--since <1week>] [--from <date>] [--to <date>] [--layer 1|2|3]
   notes hierarchy [--from <date>] [--to <date>]
   notes smo <id> [--depth 0|1|2]
+  notes export [--out <dir>] [--no-sources] [--concurrency <n>]
   notes config set api-key <key>
   notes config set api-url <url>
   notes config list`);

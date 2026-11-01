@@ -393,11 +393,16 @@ notes context --since 1week --budget 8000
 notes context --from 2026-04-01 --to 2026-04-07 --layer 2
 notes hierarchy --from 2026-04-01 --to 2026-04-16
 notes smo <id> --depth 1
+notes export --out ./notes-export          # every memory + source as Markdown
 notes config set api-key <key>
 notes config set api-url https://notes-api.lost2038.com
 ```
 
 Config stored in `~/.notes/config.json`.
+
+### `notes export` (`worker/cli/export.js`)
+
+Dumps every SMO (all layers) and every raw source an SMO points to into Markdown files with YAML frontmatter, using only the read-only agent endpoints. Layout: `index.md`, `memories/{daily,weekly,monthly}/<date>_<slug>.md`, `sources/<source_type>/<date>_<slug>_<id8>.md`. Memories link to their parent/child memories and sources with relative links; sources link back to the memories that cite them. Flags: `--out <dir>` (default `notes-export`), `--no-sources`, `--concurrency <n>` (default 6). Raw sources not yet attached to any SMO (e.g. ingested today, before SMO generation) are not included.
 
 ---
 
